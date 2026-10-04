@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userRole(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && ((exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userRole(request.auth.uid) == 'admin')
+        || (exists(/databases/$(database)/documents/user/$(request.auth.uid))
+        && get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isWorker() {
+      return isSignedIn() && ((exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userRole(request.auth.uid) == 'worker')
+        || (exists(/databases/$(database)/documents/user/$(request.auth.uid))
+        && get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'worker'));
+    }
+
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /serviceSubservices/{subserviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /galleryPhotos/{photoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /blockedDays/{dayId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /blockedTimes/{timeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /availability/{dateId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /busySlots/{slotId} {
+      allow get, list: if true;
+      allow create: if isAdmin() || (
+        request.resource.data.keys().hasOnly(['appointmentId', 'appointmentIds', 'date', 'time', 'startTime', 'slotIndex', 'duration', 'branchId'])
+        && request.resource.data.get('branchId', 'main') in ['main', 'north']
+        && request.resource.data.appointmentId is string
+        && request.resource.data.appointmentIds is list
+        && request.resource.data.appointmentId in request.resource.data.appointmentIds
+        && request.resource.data.date is string
+        && request.resource.data.time is string
+        && request.resource.data.startTime is string
+        && request.resource.data.duration is number
+        && request.resource.data.slotIndex is int
+        && request.resource.data.slotIndex >= 0
+        && request.resource.data.slotIndex < request.resource.data.duration / 60
+        && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.date == request.resource.data.date
+        && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.time == request.resource.data.startTime
+        && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.get('duration', getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.get('service', {}).get('duration', -1)) == request.resource.data.duration
+        && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.get('branchId', 'main') == request.resource.data.get('branchId', 'main')
+      );
+      allow update, delete: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /appointments/{appointmentId} {
+      allow create: if (isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.get('branchId', 'main') in ['main', 'north']
+        && (request.resource.data.status == 'pending' || isAdmin()))
+        || (!isSignedIn() && request.resource.data.get('branchId', 'main') in ['main', 'north'] && request.resource.data.status == 'pending');
+      allow read: if isAdmin()
+        || (isWorker() && resource.data.workerUid == request.auth.uid)
+        || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow create: if isAdmin() || (isSignedIn() && request.auth.uid == userId
+        && request.resource.data.role == 'client');
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId
+        && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    match /user/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow write: if isAdmin() && request.auth.uid != userId;
+    }
+  }
+}
