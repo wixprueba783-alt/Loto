@@ -203,7 +203,7 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
   }
 
   const filtered = branchAppointments.filter(a =>
-    a.date >= dateFrom &&
+    a.date === dateFrom &&
     (statusFilter === 'all' || a.status === statusFilter) &&
     (a.clientName.toLowerCase().includes(search.toLowerCase()) ||
     (a.branchId === 'north' ? 'sucursal norte' : 'sucursal principal').includes(search.toLowerCase()) ||
@@ -360,27 +360,26 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
               type="button"
               aria-haspopup="dialog"
               aria-expanded={datePickerOpen}
-              aria-label={`Filtrar citas desde ${formatDateFilter(dateFrom)}`}
+              aria-label={`Filtrar citas del ${formatDateFilter(dateFrom)}`}
               onClick={() => setDatePickerOpen(open => !open)}
               className="flex min-w-[220px] items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2.5 text-left transition hover:border-[var(--color-primary)]"
             >
-              <span className="text-[10px] font-700 uppercase tracking-wide text-[var(--color-text-muted)]">Desde</span>
+              <span className="text-[10px] font-700 uppercase tracking-wide text-[var(--color-text-muted)]">Fecha</span>
               <span className="flex-1 text-sm font-500 text-[var(--color-text)]">{formatDateFilter(dateFrom)}</span>
               <CalendarDays size={16} className="text-[var(--color-primary)]" />
             </button>
             {datePickerOpen && (
               <div
                 role="dialog"
-                aria-label="Seleccionar fecha inicial"
+                aria-label="Seleccionar fecha"
                 className="absolute right-0 top-full z-50 mt-2 w-[min(19rem,calc(100vw-2rem))] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-lg)]"
               >
                 <div className="mb-4 flex items-center justify-between">
                   <button
                     type="button"
                     aria-label="Mes anterior"
-                    disabled={calendarYear === Number(todayDateKey.slice(0, 4)) && calendarMonth === Number(todayDateKey.slice(5, 7)) - 1}
                     onClick={() => moveCalendarMonth(-1)}
-                    className="btn-ghost p-2 disabled:cursor-not-allowed disabled:opacity-30"
+                    className="btn-ghost p-2"
                   >
                     <ChevronLeft size={17} />
                   </button>
@@ -411,19 +410,16 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
                     const pendingCount = pendingAppointmentsByDate[dateKey] ?? 0;
                     const isSelected = dateKey === dateFrom;
                     const isToday = dateKey === todayDateKey;
-                    const isPast = dateKey < todayDateKey;
                     return (
                       <button
                         key={dateKey}
                         type="button"
-                        disabled={isPast}
                         aria-label={`${day} ${MONTHS[calendarMonth]}${pendingCount ? `, ${pendingCount} citas pendientes de confirmar` : ''}`}
                         aria-pressed={isSelected}
                         onClick={() => chooseDate(dateKey)}
                         className={`relative mx-auto flex h-9 w-9 items-center justify-center rounded-full text-xs transition
                           ${isSelected ? 'bg-[var(--color-primary)] font-700 text-[#1A1316]' : 'text-[var(--color-text)] hover:bg-[rgba(217,154,159,0.14)]'}
-                          ${isToday && !isSelected ? 'border border-[var(--color-primary)] text-[var(--color-primary)]' : ''}
-                          ${isPast ? 'cursor-not-allowed opacity-30 hover:bg-transparent' : ''}`}
+                          ${isToday && !isSelected ? 'border border-[var(--color-primary)] text-[var(--color-primary)]' : ''}`}
                       >
                         {day}
                         {pendingCount > 0 && (
