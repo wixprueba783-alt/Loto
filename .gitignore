@@ -6,6 +6,7 @@ build/
 !.env.example
 /whatsapp-service/.wwebjs_auth/
 /whatsapp-service/.data/
+/whatsapp-service/logs/
 /whatsapp-service/service-account.json
 /.wwebjs_cache/
 .vite/

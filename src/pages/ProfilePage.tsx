@@ -51,9 +51,9 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
           <div className="flex-1">
             {!editing ? (
               <>
-                <h2 className="text-xl font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>{user.name}</h2>
-                <p className="text-sm text-[#6B5A5E] mb-1">{user.email}</p>
-                <p className="text-sm text-[#6B5A5E]">{user.phone}</p>
+                <h2 className="text-xl font-700 text-[#FFFDFC]" style={{ fontFamily: 'var(--font-display)' }}>{user.name}</h2>
+                <p className="text-sm text-white/65 mb-1">{user.email}</p>
+                <p className="text-sm text-white/65">{user.phone}</p>
               </>
             ) : (
               <div className="space-y-3">
@@ -82,7 +82,7 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-3 mt-6 pt-5 border-t border-[#F5EDE6]">
+        <div className="grid grid-cols-4 gap-3 mt-6 pt-5 border-t border-[#3D3438]">
           {[
             { label: 'Total citas', value: stats.total },
             { label: 'Completadas', value: stats.completed },
@@ -91,7 +91,7 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
           ].map((s, i) => (
             <div key={i} className="text-center">
               <div className="text-lg font-700 text-[#C1536A]">{s.value}</div>
-              <div className="text-xs text-[#6B5A5E] font-500">{s.label}</div>
+              <div className="text-xs text-white/60 font-500">{s.label}</div>
             </div>
           ))}
         </div>
@@ -99,19 +99,19 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
 
       {/* Appointment history */}
       <div className="card overflow-hidden">
-        <div className="p-5 border-b border-[#F5EDE6]">
-          <h3 className="font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>Historial de citas</h3>
+        <div className="p-5 border-b border-[#3D3438]">
+          <h3 className="font-700 text-[#FFFDFC]" style={{ fontFamily: 'var(--font-display)' }}>Historial de citas</h3>
         </div>
         <div className="p-4 sm:p-5 space-y-3">
           {myAppts.map(appt => (
-            <div key={appt.id} className="rounded-xl border border-[#F0E5E0] bg-[#FFFCFB] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div key={appt.id} className="rounded-xl border border-[#3D3438] bg-[#171517] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-4 min-w-0">
-                <div className="w-14 h-14 rounded-xl overflow-hidden bg-[#F5EDE6] flex-shrink-0">
+                <div className="w-14 h-14 rounded-xl overflow-hidden bg-[#302326] flex-shrink-0">
                   <img src={appt.service.image} alt={appt.service.name} className="w-full h-full object-cover" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-base font-700 text-[#1A1012] truncate">{(appt.services ?? [appt.service]).map(service => service.name).join(' + ')}</div>
-                  <div className="text-sm text-[#6B5A5E] mt-1">{formatDate(appt.date)} · {appt.time}</div>
+                  <div className="text-base font-700 text-[#FFFDFC] truncate">{(appt.services ?? [appt.service]).map(service => service.name).join(' + ')}</div>
+                  <div className="text-sm text-white/60 mt-1">{formatDate(appt.date)} · {appt.time}</div>
                 </div>
               </div>
               <div className="flex items-center justify-between sm:justify-end gap-4 sm:min-w-[190px]">
