@@ -12,13 +12,38 @@ import {
   updateProfile,
 } from 'firebase/auth';
 
-const firebaseEnv = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+interface FirebaseWebConfig {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
+};
+
+declare global {
+  interface Window {
+    __LOTO_FIREBASE_CONFIG__?: Partial<FirebaseWebConfig>;
+  }
+}
+
+const runtimeFirebaseConfig =
+  typeof window !== "undefined" ? window.__LOTO_FIREBASE_CONFIG__ : undefined;
+
+const firebaseEnv: FirebaseWebConfig = {
+  apiKey: runtimeFirebaseConfig?.apiKey || import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:
+    runtimeFirebaseConfig?.authDomain ||
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:
+    runtimeFirebaseConfig?.projectId || import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:
+    runtimeFirebaseConfig?.storageBucket ||
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId:
+    runtimeFirebaseConfig?.messagingSenderId ||
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: runtimeFirebaseConfig?.appId || import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 export const firebaseConfigured = Object.values(firebaseEnv).every(Boolean);

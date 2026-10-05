@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+**/node_modules
+dist
+build
+.cache
+.vite
+.wwebjs_cache
+whatsapp-service/.data
+whatsapp-service/.wwebjs_auth
+whatsapp-service/.env
+whatsapp-service/service-account.json
+*.log

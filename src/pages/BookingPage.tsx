@@ -25,6 +25,13 @@ interface Props {
 
 const STEPS = ['Servicios principales', 'Servicio especializado', 'Fecha', 'Hora', 'Datos', 'Pago'];
 
+function getMexicanPhoneDigits(phone = '') {
+  let digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('521') && digits.length === 13) digits = digits.slice(3);
+  else if (digits.startsWith('52') && digits.length === 12) digits = digits.slice(2);
+  return digits;
+}
+
 export function BookingPage({ setPage, role, user, initialService, branchId, onConfirm }: Props) {
   const [step, setStep] = useState(0);
   const [selectedServices, setSelectedServices] = useState<Service[]>(initialService ? [initialService] : []);
@@ -35,7 +42,11 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
-  const [contact, setContact] = useState({ name: user?.name || '', email: user?.email || '', phone: user?.phone || '' });
+  const [contact, setContact] = useState({
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: getMexicanPhoneDigits(user?.phone),
+  });
   const [payments, setPayments] = useState<{ method: PaymentMethod; amount: string }[]>([{ method: 'cash', amount: initialService ? String(initialService.price) : '0' }]);
   const [proofFile, setProofFile] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -125,7 +136,7 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
     setBookingError('');
     const appt = {
       service, services: selectedServices, duration: bookingDuration, date: selectedDate, time: selectedTime,
-      contact, payments: [],
+      contact: { ...contact, phone: `+52${getMexicanPhoneDigits(contact.phone)}` }, payments: [],
       total: bookingTotal,
       subservices: selectedAddOns,
       paymentProof: role === 'admin' && selectedPaymentMethod === 'transfer' ? proofFile || undefined : undefined,
@@ -422,20 +433,34 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
                   <label className="block text-xs font-600 text-[#3D2A2F] mb-1.5">
                     {field === 'name' ? 'Nombre completo' : field === 'email' ? 'Correo electrónico' : 'Teléfono'}
                   </label>
-                  <input className="input-field" type={field === 'email' ? 'email' : 'text'}
-                    placeholder={field === 'name' ? 'Sofía Martínez' : field === 'email' ? 'sofia@email.com' : '555-234-5678'}
-                    value={contact[field as keyof typeof contact]}
-                    onChange={e => setContact(c => ({ ...c, [field]: e.target.value }))}
-                    readOnly={role !== 'guest' && !!user}
-                    style={{ background: role !== 'guest' && user ? 'var(--color-surface)' : undefined }}
-                  />
+                  {field === 'phone' ? (
+                    <div className="flex">
+                      <span className="input-field rounded-r-none border-r-0 flex items-center text-[#6B5A5E]">+52</span>
+                      <input className="input-field rounded-l-none" type="tel"
+                        placeholder="81 1234 5678"
+                        value={contact.phone}
+                        maxLength={10}
+                        onChange={e => setContact(c => ({ ...c, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                        readOnly={role !== 'guest' && !!user}
+                        style={{ background: role !== 'guest' && user ? 'var(--color-surface)' : undefined }}
+                      />
+                    </div>
+                  ) : (
+                    <input className="input-field" type={field === 'email' ? 'email' : 'text'}
+                      placeholder={field === 'name' ? 'Sofía Martínez' : 'sofia@email.com'}
+                      value={contact[field as keyof typeof contact]}
+                      onChange={e => setContact(c => ({ ...c, [field]: e.target.value }))}
+                      readOnly={role !== 'guest' && !!user}
+                      style={{ background: role !== 'guest' && user ? 'var(--color-surface)' : undefined }}
+                    />
+                  )}
                 </div>
               ))}
             </div>
             <div className="mt-6 flex justify-between">
               <button className="btn-ghost" onClick={() => setStep(3)}><ChevronLeft size={16} /> Atrás</button>
               <button className="btn-primary"
-                disabled={!contact.name || !contact.email || !contact.phone}
+                disabled={!contact.name || !contact.email || getMexicanPhoneDigits(contact.phone).length !== 10}
                 onClick={() => setStep(5)}>
                 Continuar <ChevronRight size={16} />
               </button>

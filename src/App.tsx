@@ -21,7 +21,7 @@ import { AdminStatsPage } from './pages/admin/StatsPage';
 import { AdminSettingsPage } from './pages/admin/SettingsPage';
 import { WorkerTodayPage } from './pages/WorkerTodayPage';
 import { auth, loginWithFirebase, logoutFromFirebase, registerWithFirebase } from './firebase';
-import { addAppointment, getUserProfile, initFirestoreData, saveUserProfile, subscribeFirestoreData } from './data';
+import { addAppointment, BUSINESS_SETTINGS, getUserProfile, initFirestoreData, saveUserProfile, subscribeFirestoreData } from './data';
 import type { Role, Page, Service, User, BranchId } from './types';
 
 const NO_LAYOUT_PAGES: Page[] = ['login', 'register'];
@@ -29,10 +29,16 @@ const NO_LAYOUT_PAGES: Page[] = ['login', 'register'];
 export default function App() {
   const savedSession = typeof window !== 'undefined' ? window.localStorage.getItem('loto_session') : null;
   const parsedSession = savedSession ? JSON.parse(savedSession) as { role: Role; user: User; page?: Page } : null;
+  const requestedBranch = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('branch')
+    : null;
+  const qrBranch: BranchId | null = requestedBranch === 'main' || requestedBranch === 'north'
+    ? requestedBranch
+    : null;
   const savedBranch = typeof window !== 'undefined' ? window.localStorage.getItem('loto_branch_id') : null;
-  const initialBranch: BranchId = savedBranch === 'north' ? 'north' : 'main';
+  const initialBranch: BranchId = qrBranch ?? (savedBranch === 'north' ? 'north' : 'main');
   const [role, setRole] = useState<Role>(parsedSession?.role || 'guest');
-  const [page, setPage] = useState<Page>(parsedSession?.page || (parsedSession?.role === 'admin' ? 'admin-dashboard' : 'home'));
+  const [page, setPage] = useState<Page>(qrBranch ? 'booking' : parsedSession?.page || (parsedSession?.role === 'admin' ? 'admin-dashboard' : 'home'));
   const [user, setUser] = useState<User | null>(parsedSession?.user || null);
   const [branchId, setBranchId] = useState<BranchId>(initialBranch);
   const [adminBranchId, setAdminBranchId] = useState<BranchId>('main');
@@ -52,13 +58,13 @@ export default function App() {
             if (profile?.role) {
               setRole(profile.role);
               setUser(profile);
-              setPage(profile.role === 'admin' ? 'admin-dashboard' : profile.role === 'worker' ? 'worker-today' : 'home');
+              setPage(qrBranch ? 'booking' : profile.role === 'admin' ? 'admin-dashboard' : profile.role === 'worker' ? 'worker-today' : 'home');
             }
           });
         }
         setRole('guest');
         setUser(null);
-        setPage('home');
+        setPage(qrBranch ? 'booking' : 'home');
       })
       .then(() => {
         setFirestoreLoading(false);
@@ -146,7 +152,7 @@ export default function App() {
       duration: appt.duration,
       date: appt.date,
       time: appt.time,
-      status: 'pending',
+      status: BUSINESS_SETTINGS.autoConfirm ? 'confirmed' : 'pending',
       payments: appt.payments,
       total: appt.total,
       subservices: appt.subservices,
@@ -332,7 +338,7 @@ function PageContent({ page, role, user, setPage, branchId, adminBranchId, onSel
     case 'admin-stats':
       return <AdminStatsPage branchId={adminBranchId} />;
     case 'admin-settings':
-      return <AdminSettingsPage />;
+      return <AdminSettingsPage branchId={adminBranchId} />;
 
     default:
       return (

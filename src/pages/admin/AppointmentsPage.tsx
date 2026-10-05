@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eye, Check, X, Edit2, Ban, CheckCircle2, Search, Printer, FileDown, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Eye, Check, X, Edit2, Ban, CheckCircle2, Search, Printer, FileDown, CalendarDays, ChevronLeft, ChevronRight, Bell } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { APPOINTMENTS, BUSINESS_SETTINGS, MONTHS, finalizeAppointmentPaymentWithTicketFolio, getWorkers, loadAdminAppointments, subscribeAdminAppointments, updateAppointmentStatus, updateAppointmentWorker } from '../../data';
+import { APPOINTMENTS, BUSINESS_SETTINGS, MONTHS, finalizeAppointmentPaymentWithTicketFolio, getWorkers, loadAdminAppointments, requestAppointmentReminder, subscribeAdminAppointments, updateAppointmentStatus, updateAppointmentWorker } from '../../data';
 import { AppointmentBadge } from '../../components/StatusBadge';
 import { Modal } from '../../components/Modal';
 import { ticketToRawBtUrl, splitTaxInclusivePrice } from '../../ticket';
@@ -141,6 +141,9 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
   const [showPriceEditor, setShowPriceEditor] = useState(false);
   const [workers, setWorkers] = useState<User[]>([]);
   const [loadError, setLoadError] = useState('');
+  const [reminderSending, setReminderSending] = useState(false);
+  const [reminderFeedback, setReminderFeedback] = useState('');
+  const [reminderError, setReminderError] = useState('');
 
   useEffect(() => {
     getWorkers().then(setWorkers).catch(() => setWorkers([]));
@@ -216,6 +219,21 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
       setPaymentConfirmAppt(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'No se pudo actualizar la cita.');
+    }
+  }
+
+  async function sendAppointmentReminder(appointment: Appointment) {
+    if (reminderSending) return;
+    setReminderSending(true);
+    setReminderFeedback('');
+    setReminderError('');
+    try {
+      await requestAppointmentReminder(appointment.id);
+      setReminderFeedback('Recordatorio solicitado. Se enviará por WhatsApp en breve.');
+    } catch (error) {
+      setReminderError(error instanceof Error ? error.message : 'No se pudo solicitar el recordatorio.');
+    } finally {
+      setReminderSending(false);
     }
   }
 
@@ -473,7 +491,11 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
                   <td className="px-4 py-3"><AppointmentBadge status={appt.status} /></td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button title="Ver" className="btn-ghost p-1.5 text-[#6B5A5E]" onClick={() => setViewAppt(appt)}>
+                      <button title="Ver" className="btn-ghost p-1.5 text-[#6B5A5E]" onClick={() => {
+                        setReminderFeedback('');
+                        setReminderError('');
+                        setViewAppt(appt);
+                      }}>
                         <Eye size={14} />
                       </button>
                       {appt.status === 'pending' && (
@@ -514,6 +536,8 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
       {viewAppt && (
         <Modal title={`Cita ${viewAppt.id}`} onClose={() => setViewAppt(null)} size="md">
           <div className="space-y-4">
+            {reminderFeedback && <p role="status" className="text-sm text-emerald-700">{reminderFeedback}</p>}
+            {reminderError && <p role="alert" className="text-sm text-red-600">{reminderError}</p>}
             <div className="grid grid-cols-2 gap-3">
               <InfoField label="Cliente" value={viewAppt.clientName} />
               <InfoField label="Teléfono" value={viewAppt.clientPhone} />
@@ -577,13 +601,18 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
               </div>
             )}
             {viewAppt.status === 'confirmed' && (
-              <div className="flex gap-2 pt-2 border-t border-[#F5EDE6]">
-                <button className="btn-primary flex-1 justify-center" onClick={() => openPaymentConfirmation(viewAppt)}>
-                  <CheckCircle2 size={15} /> Confirmar pago
+              <div className="space-y-2 pt-2 border-t border-[#F5EDE6]">
+                <button className="btn-secondary w-full justify-center" onClick={() => void sendAppointmentReminder(viewAppt)} disabled={reminderSending}>
+                  <Bell size={15} /> {reminderSending ? 'Enviando...' : 'Recordatorio'}
                 </button>
-                <button className="btn-secondary flex-1 justify-center" onClick={() => changeStatus(viewAppt.id, 'cancelled')}>
-                  <Ban size={15} /> Cancelar
-                </button>
+                <div className="flex gap-2">
+                  <button className="btn-primary flex-1 justify-center" onClick={() => openPaymentConfirmation(viewAppt)}>
+                    <CheckCircle2 size={15} /> Confirmar pago
+                  </button>
+                  <button className="btn-secondary flex-1 justify-center" onClick={() => changeStatus(viewAppt.id, 'cancelled')}>
+                    <Ban size={15} /> Cancelar
+                  </button>
+                </div>
               </div>
             )}
           </div>

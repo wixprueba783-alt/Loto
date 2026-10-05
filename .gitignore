@@ -4,6 +4,10 @@ build/
 .cache/
 .env*
 !.env.example
+/whatsapp-service/.wwebjs_auth/
+/whatsapp-service/.data/
+/whatsapp-service/service-account.json
+/.wwebjs_cache/
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo

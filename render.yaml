@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: loto-whatsapp
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    disk:
+      name: loto-whatsapp-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: FIREBASE_PROJECT_ID
+        value: loto-19em
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/service-account.json
+      - key: WHATSAPP_LOCAL_AUTH_DIR
+        value: /var/data/wwebjs_auth
+      - key: NOTIFIED_APPOINTMENTS_FILE
+        value: /var/data/notified-appointments.json
+      - key: BUSINESS_TIME_ZONE
+        value: America/Mexico_City
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        value: loto-19em
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false
