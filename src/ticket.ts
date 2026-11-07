@@ -85,9 +85,9 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
 
   const width = 576;
   const margin = 10;
-  const ticketFontSize = (fontSize: number) => fontSize >= 27 ? 24 : fontSize >= 24 ? 22 : 18;
+  const ticketFontSize = (fontSize: number) => fontSize >= 27 ? 30 : fontSize >= 24 ? 26 : 22;
   const compactGap = (gap: number | undefined) => Math.min(6, Math.max(3, gap ? gap / 3 : 4));
-  const lineHeight = (fontSize: number) => Math.round(fontSize * 1.5);
+  const lineHeight = (fontSize: number) => Math.round(fontSize * 1.6);
   const contentWidth = width - margin * 2;
   const measuringCanvas = document.createElement('canvas');
   const measuringContext = measuringCanvas.getContext('2d');
@@ -111,7 +111,7 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
     if (currentLine) lines.push(currentLine);
     return { row, lines };
   });
-  const bottomPadding = 10;
+  const bottomPadding = 50;
   const logoWidth = 350;
   const logoHeight = 350;
   const logoTop = 4;
