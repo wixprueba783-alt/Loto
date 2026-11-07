@@ -10,7 +10,9 @@ const directory = path.dirname(fileURLToPath(import.meta.url))
 const distDirectory = path.resolve(directory, "../dist")
 const whatsapp = createWhatsAppService()
 const port = Number(process.env.PORT || 10000)
-const allowedOrigins = parseAllowedOrigins(process.env.WHATSAPP_ALLOWED_ORIGINS)
+const allowedOrigins = parseAllowedOrigins(
+  process.env.WHATSAPP_ALLOWED_ORIGINS || undefined,
+)
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
