@@ -1,4 +1,21 @@
 import type { Appointment } from './types';
+import ticketLogoUrl from './assets/loto-logo.png';
+
+export const TICKET_LOGO_URL = ticketLogoUrl;
+
+let ticketLogoPromise: Promise<HTMLImageElement> | undefined;
+
+export function loadTicketLogo() {
+  if (!ticketLogoPromise) {
+    ticketLogoPromise = new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('No se pudo cargar el logo para el ticket.'));
+      image.src = ticketLogoUrl;
+    });
+  }
+  return ticketLogoPromise;
+}
 
 export interface PrintableTicket {
   appointment: Appointment;
@@ -25,7 +42,8 @@ export function splitTaxInclusivePrice(total: number) {
   return { subtotal, tax, total: roundedTotal };
 }
 
-export function ticketToRawBtUrl(ticket: PrintableTicket) {
+export async function ticketToRawBtUrl(ticket: PrintableTicket) {
+  const logo = await loadTicketLogo();
   const { subtotal, tax, total } = splitTaxInclusivePrice(ticket.total);
   const methodLabel: Record<string, string> = { cash: 'Efectivo', transfer: 'Transf.', card: 'Tarjeta' };
   type ReceiptRow = {
@@ -91,7 +109,8 @@ export function ticketToRawBtUrl(ticket: PrintableTicket) {
     return { row, lines };
   });
   const bottomPadding = 56;
-  const height = 12 + layout.reduce((sum, item) => sum
+  const logoSize = 220;
+  const height = 12 + logoSize + layout.reduce((sum, item) => sum
     + (item.row.separator ? 15 : item.lines.length * (item.row.fontSize + 7))
     + (item.row.gapAfter ?? 7), 0) + bottomPadding;
   const canvas = document.createElement('canvas');
@@ -103,7 +122,8 @@ export function ticketToRawBtUrl(ticket: PrintableTicket) {
   context.fillRect(0, 0, width, height);
   context.fillStyle = '#000';
   context.textBaseline = 'top';
-  let y = 6;
+  context.drawImage(logo, (width - logoSize) / 2, 6, logoSize, logoSize);
+  let y = logoSize + 12;
   for (const { row, lines: wrappedLines } of layout) {
     if (row.separator) {
       context.save();

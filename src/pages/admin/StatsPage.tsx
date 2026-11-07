@@ -1,48 +1,230 @@
+import { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, Legend } from 'recharts';
-import { APPOINTMENTS } from '../../data';
-import { TrendingUp, TrendingDown } from 'lucide-react';
-import type { BranchId } from '../../types';
+import { APPOINTMENTS, BRANCH_LABEL, MONTHS, getAppointmentPaymentSummary } from '../../data';
+import { Download, LoaderCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import type { AppointmentStatus, BranchId, PaymentMethod } from '../../types';
+import { createXlsxBlob } from '../../xlsx';
 
-const monthlyData = [
-  { month: 'Abr', citas: 32, ingresos: 12800, canceladas: 3 },
-  { month: 'May', citas: 45, ingresos: 17550, canceladas: 4 },
-  { month: 'Jun', citas: 38, ingresos: 14820, canceladas: 2 },
-  { month: 'Jul', citas: 52, ingresos: 20280, canceladas: 5 },
-  { month: 'Ago', citas: 60, ingresos: 23400, canceladas: 4 },
-  { month: 'Sep', citas: 47, ingresos: 18330, canceladas: 3 },
-];
+const MONTH_WINDOW = 6;
 
-const serviceDistrib = [
-  { name: 'Gel semipermanente', value: 28 },
-  { name: 'Acrílicas', value: 22 },
-  { name: 'Manicura', value: 18 },
-  { name: 'Pedicura', value: 15 },
-  { name: 'Arte en uñas', value: 10 },
-  { name: 'Otros', value: 7 },
-];
-
-const paymentDistrib = [
-  { name: 'Transferencia', value: 45 },
-  { name: 'Efectivo', value: 35 },
-  { name: 'Tarjeta', value: 20 },
-];
+const paymentMethodLabel: Record<PaymentMethod, string> = { transfer: 'Transferencia', cash: 'Efectivo', card: 'Tarjeta' };
 
 const roseChartColors = ['#E8778A', '#C1536A', '#FECDD5', '#F5EDE6', '#9D3050', '#BBA9AD'];
 const oliveChartColors = ['#BBC58E', '#899765', '#D8DEBE', '#E5E8D8', '#66734A', '#AEB895'];
 
+type ReportPeriod = 'day' | 'week' | 'month' | 'year' | 'custom';
+
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function getReportDateRange(period: ReportPeriod, startDate: string, endDate: string, now: Date) {
+  const today = localDateKey(now);
+  if (period === 'day') return [today, today] as const;
+  if (period === 'week') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    return [localDateKey(start), localDateKey(end)] as const;
+  }
+  if (period === 'month') {
+    return [
+      localDateKey(new Date(now.getFullYear(), now.getMonth(), 1)),
+      localDateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+    ] as const;
+  }
+  if (period === 'year') {
+    return [
+      localDateKey(new Date(now.getFullYear(), 0, 1)),
+      localDateKey(new Date(now.getFullYear(), 11, 31)),
+    ] as const;
+  }
+  return [startDate, endDate] as const;
+}
+
 export function AdminStatsPage({ branchId }: { branchId: BranchId }) {
+  const [period, setPeriod] = useState<ReportPeriod>('month');
+  const [customStartDate, setCustomStartDate] = useState(() => localDateKey(new Date()));
+  const [customEndDate, setCustomEndDate] = useState(() => localDateKey(new Date()));
+  const [serviceFilter, setServiceFilter] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState<PaymentMethod | ''>('');
+  const [statusFilter, setStatusFilter] = useState<AppointmentStatus | ''>('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
   const chartColors = branchId === 'north' ? oliveChartColors : roseChartColors;
-  const services = serviceDistrib.map((entry, index) => ({ ...entry, color: chartColors[index] }));
-  const payments = paymentDistrib.map((entry, index) => ({ ...entry, color: chartColors[index] }));
+  const branchAppointments = APPOINTMENTS.filter(appointment => (appointment.branchId ?? 'main') === branchId);
+  const [rangeStart, rangeEnd] = getReportDateRange(period, customStartDate, customEndDate, new Date());
+  const reportAppointments = branchAppointments.filter(appointment => {
+    if (appointment.date < rangeStart || appointment.date > rangeEnd) return false;
+    if (serviceFilter && !(appointment.services ?? [appointment.service]).some(service => service.name === serviceFilter)) return false;
+    if (paymentFilter && !getAppointmentPaymentSummary(appointment).payments.some(payment => payment.method === paymentFilter)) return false;
+    if (statusFilter && appointment.status !== statusFilter) return false;
+    return true;
+  });
+  const reportRevenue = reportAppointments.reduce((sum, appointment) => sum + getAppointmentPaymentSummary(appointment).paid, 0);
+  const serviceOptions = Array.from(new Set(branchAppointments.flatMap(appointment =>
+    (appointment.services ?? [appointment.service]).map(service => service.name),
+  ))).sort((a, b) => a.localeCompare(b, 'es'));
+
+  async function exportReport() {
+    setExporting(true);
+    setExportError('');
+    try {
+      const rows: (string | number)[][] = [
+        ['Folio', 'Fecha', 'Hora', 'Cliente', 'Servicio', 'Estado', 'Método de pago', 'Pagado', 'Total'],
+      ];
+      for (const appointment of reportAppointments) {
+        const payments = getAppointmentPaymentSummary(appointment).payments;
+        rows.push([
+          appointment.ticketFolio || appointment.id,
+          appointment.date,
+          appointment.time,
+          appointment.clientName,
+          (appointment.services ?? [appointment.service]).map(service => service.name).join(', '),
+          appointment.status,
+          [...new Set(payments.map(payment => paymentMethodLabel[payment.method]))].join(', ') || 'Sin pago',
+          getAppointmentPaymentSummary(appointment).paid,
+          appointment.total,
+        ]);
+      }
+      const blob = createXlsxBlob(`Reporte ${BRANCH_LABEL[branchId]}`, rows);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Reporte_${branchId === 'north' ? 'Escobedo' : 'San_Nicolas'}.xlsx`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error('No se pudo exportar el reporte de la sucursal:', error);
+      setExportError(error instanceof Error ? error.message : 'No se pudo generar el archivo Excel.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // Últimos 6 meses naturales, incluyendo el mes actual.
+  const now = new Date();
+  const monthKeys = Array.from({ length: MONTH_WINDOW }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (MONTH_WINDOW - 1 - index), 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  const monthlyData = monthKeys.map(key => {
+    const monthAppointments = branchAppointments.filter(appointment =>
+      typeof appointment.date === 'string' && appointment.date.slice(0, 7) === key);
+    return {
+      month: MONTHS[Number(key.slice(5, 7)) - 1].slice(0, 3),
+      citas: monthAppointments.length,
+      ingresos: monthAppointments.reduce((sum, appointment) => sum + getAppointmentPaymentSummary(appointment).paid, 0),
+      canceladas: monthAppointments.filter(appointment => appointment.status === 'cancelled').length,
+    };
+  });
+
+  // Distribución de servicios: top 5 + "Otros", en porcentaje.
+  const serviceCounts = new Map<string, number>();
+  branchAppointments.forEach(appointment => {
+    (appointment.services ?? [appointment.service]).forEach(service => {
+      serviceCounts.set(service.name, (serviceCounts.get(service.name) ?? 0) + 1);
+    });
+  });
+  const serviceEntries = Array.from(serviceCounts.entries()).sort(([, a], [, b]) => b - a);
+  const totalServices = serviceCounts.size > 0
+    ? Array.from(serviceCounts.values()).reduce((sum, count) => sum + count, 0)
+    : 0;
+  const toPercent = (count: number) => totalServices > 0 ? Math.round((count / totalServices) * 100) : 0;
+  const serviceDistrib = serviceEntries.slice(0, 5).map(([name, count]) => ({ name, value: toPercent(count) }));
+  const othersCount = serviceEntries.slice(5).reduce((sum, [, count]) => sum + count, 0);
+  if (serviceEntries.length > 5) serviceDistrib.push({ name: 'Otros', value: toPercent(othersCount) });
+
+  // Montos cobrados por método de pago (citas canceladas aportan 0).
+  const paidByMethod = { transfer: 0, cash: 0, card: 0 } as Record<PaymentMethod, number>;
+  branchAppointments.forEach(appointment => {
+    getAppointmentPaymentSummary(appointment).payments.forEach(payment => {
+      paidByMethod[payment.method] += Math.max(0, Number(payment.amount) || 0);
+    });
+  });
+  const totalPaid = paidByMethod.transfer + paidByMethod.cash + paidByMethod.card;
+  const paymentDistrib = (['transfer', 'cash', 'card'] as PaymentMethod[]).map(method => ({
+    name: paymentMethodLabel[method],
+    value: totalPaid > 0 ? Math.round((paidByMethod[method] / totalPaid) * 100) : 0,
+  }));
+
   const totalRevenue = monthlyData.reduce((s, d) => s + d.ingresos, 0);
   const totalAppts = monthlyData.reduce((s, d) => s + d.citas, 0);
-  const avgPerAppt = Math.round(totalRevenue / totalAppts);
+  const avgPerAppt = totalAppts > 0 ? Math.round(totalRevenue / totalAppts) : 0;
   const lastMonth = monthlyData[monthlyData.length - 1];
   const prevMonth = monthlyData[monthlyData.length - 2];
-  const growth = Math.round(((lastMonth.ingresos - prevMonth.ingresos) / prevMonth.ingresos) * 100);
+  const growth = prevMonth && prevMonth.ingresos > 0
+    ? Math.round(((lastMonth.ingresos - prevMonth.ingresos) / prevMonth.ingresos) * 100)
+    : 0;
+
+  const services = serviceDistrib.map((entry, index) => ({ ...entry, color: chartColors[index] }));
+  const payments = paymentDistrib.map((entry, index) => ({ ...entry, color: chartColors[index] }));
 
   return (
     <div className="space-y-6">
+      <section className="card space-y-4 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-700 text-[var(--color-text)]">Reporte de {BRANCH_LABEL[branchId]}</h2>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              {reportAppointments.length} citas · ${reportRevenue.toLocaleString()} cobrados
+            </p>
+          </div>
+          <button type="button" className="btn-primary justify-center" onClick={() => void exportReport()} disabled={exporting}>
+            {exporting ? <LoaderCircle size={16} className="animate-spin" /> : <Download size={16} />}
+            {exporting ? 'Generando...' : 'Exportar Excel'}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <label className="space-y-1 text-xs text-[var(--color-text-muted)]">
+            Periodo
+            <select className="input-field w-full" value={period} onChange={event => setPeriod(event.target.value as ReportPeriod)}>
+              <option value="day">Día (hoy)</option>
+              <option value="week">Semana actual</option>
+              <option value="month">Mes actual</option>
+              <option value="year">Año actual</option>
+              <option value="custom">Periodo personalizado</option>
+            </select>
+          </label>
+          {period === 'custom' && <>
+            <label className="space-y-1 text-xs text-[var(--color-text-muted)]">
+              Desde
+              <input className="input-field w-full" type="date" value={customStartDate} onChange={event => setCustomStartDate(event.target.value)} />
+            </label>
+            <label className="space-y-1 text-xs text-[var(--color-text-muted)]">
+              Hasta
+              <input className="input-field w-full" type="date" value={customEndDate} onChange={event => setCustomEndDate(event.target.value)} />
+            </label>
+          </>}
+          <label className="space-y-1 text-xs text-[var(--color-text-muted)]">
+            Servicio
+            <select className="input-field w-full" value={serviceFilter} onChange={event => setServiceFilter(event.target.value)}>
+              <option value="">Todos</option>
+              {serviceOptions.map(service => <option key={service} value={service}>{service}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs text-[var(--color-text-muted)]">
+            Método de pago
+            <select className="input-field w-full" value={paymentFilter} onChange={event => setPaymentFilter(event.target.value as PaymentMethod | '')}>
+              <option value="">Todos</option>
+              {(Object.keys(paymentMethodLabel) as PaymentMethod[]).map(method => <option key={method} value={method}>{paymentMethodLabel[method]}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs text-[var(--color-text-muted)]">
+            Estado de cita
+            <select className="input-field w-full" value={statusFilter} onChange={event => setStatusFilter(event.target.value as AppointmentStatus | '')}>
+              <option value="">Todos</option>
+              <option value="pending">Pendiente</option>
+              <option value="confirmed">Confirmada</option>
+              <option value="completed">Completada</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+          </label>
+        </div>
+        {exportError && <p className="text-sm text-red-600" role="alert">{exportError}</p>}
+      </section>
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[

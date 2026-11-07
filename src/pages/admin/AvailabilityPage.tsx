@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { CalendarDays, Clock, Save } from 'lucide-react';
-import { getAvailability, getBookedTimes, saveAvailability } from '../../data';
+import { useMemo, useState } from 'react';
+import { CalendarDays, Clock, Eye, EyeOff, LockKeyhole, Save } from 'lucide-react';
+import { BLOCKED_TIMES, BRANCH_LABEL, getAvailability, getReservedTimes, saveAvailability, setBlockedTime } from '../../data';
 import type { BranchId } from '../../types';
 
 export function AdminAvailabilityPage({ branchId }: { branchId: BranchId }) {
@@ -10,11 +10,15 @@ export function AdminAvailabilityPage({ branchId }: { branchId: BranchId }) {
   const [schedule, setSchedule] = useState(() => getAvailability(initialDate, branchId));
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [blockedRefresh, setBlockedRefresh] = useState(0);
+  const [savingTime, setSavingTime] = useState<string | null>(null);
+  const [blockError, setBlockError] = useState('');
 
   function changeDate(date: string) {
     setSelectedDate(date);
     setSchedule(getAvailability(date, branchId));
     setSaved(false);
+    setBlockError('');
   }
 
   function updateSchedule(changes: Partial<typeof schedule>) {
@@ -33,10 +37,30 @@ export function AdminAvailabilityPage({ branchId }: { branchId: BranchId }) {
     }
   }
 
-  const bookedTimes = getBookedTimes(selectedDate, branchId);
+  const blockedTimes = useMemo(() => new Set(
+    BLOCKED_TIMES
+      .filter(item => item.date === selectedDate && (item.branchId ?? 'main') === branchId)
+      .map(item => item.time),
+  ), [selectedDate, branchId, blockedRefresh]);
+  const reservedTimes = getReservedTimes(selectedDate, branchId);
   const openHour = Number(schedule.open.slice(0, 2));
   const closeHour = Number(schedule.close.slice(0, 2));
   const timeSlots = Array.from({ length: Math.max(0, closeHour - openHour) }, (_, index) => `${String(openHour + index).padStart(2, '0')}:00`);
+
+  async function toggleTimeVisibility(time: string) {
+    if (reservedTimes.has(time) || savingTime) return;
+    const shouldBlock = !blockedTimes.has(time);
+    setSavingTime(time);
+    setBlockError('');
+    try {
+      await setBlockedTime(selectedDate, time, shouldBlock, branchId);
+      setBlockedRefresh(current => current + 1);
+    } catch (error) {
+      setBlockError(error instanceof Error ? error.message : 'No se pudo actualizar este horario.');
+    } finally {
+      setSavingTime(null);
+    }
+  }
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -57,7 +81,7 @@ export function AdminAvailabilityPage({ branchId }: { branchId: BranchId }) {
 
         <div className="mb-5 max-w-sm">
           <div className="mb-1.5 text-xs font-600 text-[#3D2A2F]">Sucursal</div>
-          <div className="text-sm font-600 text-[#C1536A]">{branchId === 'north' ? 'Sucursal Norte' : 'Sucursal principal'}</div>
+          <div className="text-sm font-600 text-[#C1536A]">{BRANCH_LABEL[branchId]}</div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -90,14 +114,54 @@ export function AdminAvailabilityPage({ branchId }: { branchId: BranchId }) {
           {!schedule.enabled ? (
             <p className="text-sm text-[#BBA9AD]">Domingo bajo disposición.</p>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-              {timeSlots.map(time => (
-                <div key={time} className={`rounded-lg border px-3 py-2 text-center text-xs font-600 ${bookedTimes.has(time) ? 'border-[#FECDD5] bg-[#FFF1F3] text-[#C1536A]' : 'border-[#F5EDE6] bg-[#FDFAF9] text-[#6B5A5E]'}`}>
-                  {time}<span className="block text-[10px] font-500 mt-0.5">{bookedTimes.has(time) ? 'Ocupado' : 'Libre'}</span>
-                </div>
-              ))}
-            </div>
+            <>
+              <p className="mb-3 text-xs text-[#6B5A5E]">
+                Usa el ojito para ocultar o volver a mostrar una hora a los clientes. Los horarios con cita no se pueden bloquear.
+              </p>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                {timeSlots.map(time => {
+                  const blocked = blockedTimes.has(time);
+                  const reserved = reservedTimes.has(time);
+                  const disabled = reserved || savingTime !== null;
+                  return (
+                    <button
+                      key={time}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => toggleTimeVisibility(time)}
+                      aria-label={reserved
+                        ? `${time}, ocupado por una cita`
+                        : blocked
+                          ? `Mostrar ${time} a los clientes`
+                          : `Ocultar ${time} a los clientes`}
+                      title={reserved
+                        ? 'Este horario tiene una cita y no se puede modificar'
+                        : blocked
+                          ? 'Mostrar esta hora a los clientes'
+                          : 'Ocultar esta hora a los clientes'}
+                      className={`min-h-[64px] rounded-lg border px-3 py-2 text-center text-xs font-600 transition-colors disabled:cursor-not-allowed ${
+                        reserved
+                          ? 'border-[#FECDD5] bg-[#FFF1F3] text-[#C1536A]'
+                          : blocked
+                            ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                            : 'border-[#F5EDE6] bg-[#FDFAF9] text-[#6B5A5E] hover:border-[#E8778A]'
+                      }`}
+                    >
+                      <span className="mb-1 flex justify-start">
+                        {reserved ? <LockKeyhole size={14} /> : blocked ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </span>
+                      {time}
+                      <span className="mt-0.5 block text-[10px] font-500">
+                        {reserved ? 'Ocupado' : blocked ? 'Oculto' : 'Visible'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
           )}
+          {blockError && <p className="mt-3 text-sm text-red-500" role="alert">{blockError}</p>}
+          {savingTime && <p className="mt-3 text-sm text-[#6B5A5E]" role="status">Actualizando horario {savingTime}…</p>}
         </div>
       </div>
 

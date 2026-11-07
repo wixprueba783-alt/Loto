@@ -1,4 +1,4 @@
-import { APPOINTMENTS, MONTHS, getAppointmentPaymentSummary } from '../data';
+import { APPOINTMENTS, MONTHS, getAppointmentPaymentSummary, isAppointmentPriceVisible } from '../data';
 import { PaymentBadge } from '../components/StatusBadge';
 import type { BranchId, PaymentStatus, User } from '../types';
 import { CreditCard, Hash, TrendingUp } from 'lucide-react';
@@ -18,13 +18,14 @@ export function ClientPaymentsPage({ user, branchId }: { user: User | null; bran
   const myAppts = APPOINTMENTS
     .filter(a => (a.branchId ?? 'main') === branchId && (user?.uid ? a.ownerUid === user.uid : a.clientEmail === user?.email))
     .sort((first, second) => `${second.date} ${second.time}`.localeCompare(`${first.date} ${first.time}`));
-  const total = myAppts.reduce((s, a) => s + a.total, 0);
-  const paid = myAppts.reduce((sum, appointment) => sum + getAppointmentPaymentSummary(appointment).paid, 0);
-  const pending = myAppts.reduce((sum, appointment) => sum + getAppointmentPaymentSummary(appointment).due, 0);
+  const amountsVisible = myAppts.every(isAppointmentPriceVisible);
+  const total = amountsVisible ? myAppts.reduce((s, a) => s + a.total, 0) : 0;
+  const paid = amountsVisible ? myAppts.reduce((sum, appointment) => sum + getAppointmentPaymentSummary(appointment).paid, 0) : 0;
+  const pending = amountsVisible ? myAppts.reduce((sum, appointment) => sum + getAppointmentPaymentSummary(appointment).due, 0) : 0;
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {amountsVisible && <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="stat-card">
           <div className="text-xs text-[#6B5A5E] font-500 mb-1">Total servicios</div>
           <div className="text-2xl font-700 text-[#C1536A]">${total}</div>
@@ -37,7 +38,8 @@ export function ClientPaymentsPage({ user, branchId }: { user: User | null; bran
           <div className="text-xs text-[#6B5A5E] font-500 mb-1">Pendiente por pagar</div>
           <div className="text-2xl font-700 text-amber-600">${pending}</div>
         </div>
-      </div>
+      </div>}
+      {!amountsVisible && <p className="rounded-xl border border-[var(--color-border)] p-4 text-sm text-[var(--color-text-muted)]">Los importes no están disponibles en esta vista. Consulta a la sucursal para conocerlos.</p>}
 
       <div className="card overflow-hidden">
         <div className="p-5 border-b border-[var(--color-border)]">
@@ -67,10 +69,10 @@ export function ClientPaymentsPage({ user, branchId }: { user: User | null; bran
                     )}
                     <div className="text-sm text-[var(--color-text-muted)] mt-1">{formatDate(appt.date)} · {appt.time}</div>
                     <div className="text-xs text-[var(--color-text-muted)] mt-1 flex items-center gap-1"><Hash size={12} />{paymentSummary.payments.length > 0
-                      ? paymentSummary.payments.map(p => `${methodLabel[p.method]} $${p.amount}`).join(' + ')
+                      ? paymentSummary.payments.map(p => isAppointmentPriceVisible(appt) ? `${methodLabel[p.method]} $${p.amount}` : methodLabel[p.method]).join(' + ')
                       : 'Sin registro de pago'}
                     </div>
-                    {(appt.subservices ?? []).length > 0 && (
+                    {isAppointmentPriceVisible(appt) && (appt.subservices ?? []).length > 0 && (
                       <div className="mt-2 space-y-1 border-t border-[var(--color-border)] pt-2">
                         {appt.subservices?.map(subservice => (
                           <div key={subservice.id} className="flex justify-between gap-3 text-xs text-[var(--color-text-muted)]">
@@ -84,11 +86,11 @@ export function ClientPaymentsPage({ user, branchId }: { user: User | null; bran
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3 lg:justify-end lg:gap-5 lg:min-w-[260px]">
                   <div className="text-left lg:text-right">
-                    <div className="text-xs text-[var(--color-text-muted)]">Importe</div>
-                    <div className="text-xl font-700 text-[var(--color-text)]">${appt.total}</div>
+                    <div className="text-xs text-[var(--color-text-muted)]">{isAppointmentPriceVisible(appt) ? 'Importe' : 'Precio'}</div>
+                    <div className="text-xl font-700 text-[var(--color-text)]">{isAppointmentPriceVisible(appt) ? `$${appt.total}` : 'A consultar'}</div>
                   </div>
-                  <PaymentBadge status={ps} />
-                  {paymentSummary.paid > 0 && ps !== 'paid' && (
+                  {isAppointmentPriceVisible(appt) && <PaymentBadge status={ps} />}
+                  {isAppointmentPriceVisible(appt) && paymentSummary.paid > 0 && ps !== 'paid' && (
                     <div className="w-full text-xs text-[var(--color-text-muted)] sm:w-auto">
                       Pagado ${paymentSummary.paid}; resta ${paymentSummary.due}
                     </div>

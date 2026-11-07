@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { HomePage } from './pages/HomePage';
 import { CatalogPage } from './pages/CatalogPage';
+import { GalleryPage } from './pages/GalleryPage';
 import { BookingPage } from './pages/BookingPage';
 import { MyAppointmentsPage } from './pages/MyAppointmentsPage';
 import { ClientPaymentsPage } from './pages/ClientPaymentsPage';
@@ -20,15 +21,14 @@ import { AdminPaymentsPage } from './pages/admin/AdminPaymentsPage';
 import { AdminStatsPage } from './pages/admin/StatsPage';
 import { AdminSettingsPage } from './pages/admin/SettingsPage';
 import { WorkerTodayPage } from './pages/WorkerTodayPage';
-import { auth, loginWithFirebase, logoutFromFirebase, registerWithFirebase } from './firebase';
-import { addAppointment, BUSINESS_SETTINGS, getUserProfile, initFirestoreData, saveUserProfile, subscribeFirestoreData } from './data';
+import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
+import { auth, loginWithFirebase, loginWithGoogle, logoutFromFirebase, registerWithFirebase, sendPasswordRecoveryEmail } from './firebase';
+import { addAppointment, BRANCH_LABEL, BUSINESS_SETTINGS, currentPrivacyPolicyVersion, getUserProfile, initFirestoreData, saveUserProfile, subscribeFirestoreData } from './data';
 import type { Role, Page, Service, User, BranchId } from './types';
 
 const NO_LAYOUT_PAGES: Page[] = ['login', 'register'];
 
 export default function App() {
-  const savedSession = typeof window !== 'undefined' ? window.localStorage.getItem('loto_session') : null;
-  const parsedSession = savedSession ? JSON.parse(savedSession) as { role: Role; user: User; page?: Page } : null;
   const requestedBranch = typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('branch')
     : null;
@@ -37,18 +37,21 @@ export default function App() {
     : null;
   const savedBranch = typeof window !== 'undefined' ? window.localStorage.getItem('loto_branch_id') : null;
   const initialBranch: BranchId = qrBranch ?? (savedBranch === 'north' ? 'north' : 'main');
-  const [role, setRole] = useState<Role>(parsedSession?.role || 'guest');
-  const [page, setPage] = useState<Page>(qrBranch ? 'booking' : parsedSession?.page || (parsedSession?.role === 'admin' ? 'admin-dashboard' : 'home'));
-  const [user, setUser] = useState<User | null>(parsedSession?.user || null);
+  const [role, setRole] = useState<Role>('guest');
+  const [page, setPage] = useState<Page>(qrBranch ? 'booking' : 'home');
+  const [user, setUser] = useState<User | null>(null);
+  const [pendingGoogleRegistration, setPendingGoogleRegistration] = useState<{ uid: string; name: string; email: string } | null>(null);
   const [branchId, setBranchId] = useState<BranchId>(initialBranch);
-  const [adminBranchId, setAdminBranchId] = useState<BranchId>('main');
+  const [adminBranchId, setAdminBranchId] = useState<BranchId>(initialBranch);
   const [bookingService, setBookingService] = useState<Service | undefined>(undefined);
   const [notification, setNotification] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [firestoreLoading, setFirestoreLoading] = useState(true);
   const [firestoreError, setFirestoreError] = useState(false);
   const [firestoreErrorMessage, setFirestoreErrorMessage] = useState('');
   const [dataVersion, setDataVersion] = useState(0);
-  const activeTheme = (role === 'admin' ? adminBranchId : branchId) === 'north' ? 'olive' : 'rose';
+  const activeBranch = role === 'admin' ? adminBranchId : role === 'branchAdmin' ? user?.branchId ?? 'main' : branchId;
+  const activeTheme = activeBranch === 'north' ? 'olive' : 'rose';
+  const activeThemeColor = BUSINESS_SETTINGS.branchColors?.[activeBranch] || (activeBranch === 'north' ? '#BBC58E' : '#D99A9F');
 
   useEffect(() => {
     initFirestoreData()
@@ -58,7 +61,9 @@ export default function App() {
             if (profile?.role) {
               setRole(profile.role);
               setUser(profile);
-              setPage(qrBranch ? 'booking' : profile.role === 'admin' ? 'admin-dashboard' : profile.role === 'worker' ? 'worker-today' : 'home');
+              setAdminBranchId(profile.role === 'branchAdmin' ? profile.branchId ?? 'main' : 'main');
+              setBranchId(profile.role === 'branchAdmin' ? profile.branchId ?? 'main' : branchId);
+              setPage(qrBranch ? 'booking' : profile.role === 'admin' || profile.role === 'branchAdmin' ? 'admin-dashboard' : profile.role === 'worker' ? 'worker-today' : 'home');
             }
           });
         }
@@ -96,9 +101,8 @@ export default function App() {
   }, [role, firestoreLoading]);
 
   useEffect(() => {
-    if (role === 'guest') window.localStorage.removeItem('loto_session');
-    else window.localStorage.setItem('loto_session', JSON.stringify({ role, user, page }));
-  }, [role, user, page]);
+    window.localStorage.removeItem('loto_session');
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem('loto_branch_id', branchId);
@@ -110,26 +114,124 @@ export default function App() {
   }
 
   async function handleLogin(email: string, password: string) {
-    const credentials = await loginWithFirebase(email, password);
-    const profile = await getUserProfile(credentials.user.uid);
-    if (!profile?.role) {
-      await logoutFromFirebase();
-      throw new Error('Tu cuenta no tiene un rol asignado. Contacta al administrador.');
+    try {
+      const credentials = await loginWithFirebase(email, password);
+      const profile = await getUserProfile(credentials.user.uid);
+      if (!profile?.role) {
+        await logoutFromFirebase();
+        throw new Error('Tu cuenta no tiene un rol asignado. Contacta al administrador.');
+      }
+      setRole(profile.role);
+      setUser({ ...profile, uid: credentials.user.uid });
+      setAdminBranchId(profile.role === 'branchAdmin' ? profile.branchId ?? 'main' : 'main');
+      setBranchId(profile.role === 'branchAdmin' ? profile.branchId ?? 'main' : branchId);
+      setPage(profile.role === 'admin' || profile.role === 'branchAdmin' ? 'admin-dashboard' : profile.role === 'worker' ? 'worker-today' : 'home');
+      showNotification('Sesión iniciada correctamente');
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+        throw new Error('Correo o contraseña incorrectos.');
+      }
+      throw error;
     }
-    setRole(profile.role);
-    setUser({ ...profile, uid: credentials.user.uid });
-    setPage(profile.role === 'admin' ? 'admin-dashboard' : profile.role === 'worker' ? 'worker-today' : 'home');
-    showNotification('Sesión iniciada correctamente');
   }
 
-  async function handleRegister(data: { name: string; email: string; phone: string; password: string }) {
+  async function handleRegister(data: { name: string; email: string; phone: string; password: string; marketingConsent: boolean }) {
     const credentials = await registerWithFirebase(data.name, data.email, data.password);
-    const profile = { name: data.name, email: data.email, phone: data.phone, role: 'client' as const };
+    const acceptedAt = new Date().toISOString();
+    const profile = {
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      role: 'client' as const,
+      privacyConsent: { accepted: true, version: currentPrivacyPolicyVersion(), acceptedAt, source: 'registration' as const },
+      marketingConsent: { accepted: data.marketingConsent, ...(data.marketingConsent ? { acceptedAt } : {}) },
+    };
     await saveUserProfile(credentials.user.uid, profile);
     setRole('client');
     setUser({ ...profile, uid: credentials.user.uid });
     setPage('home');
     showNotification('¡Cuenta creada exitosamente!');
+  }
+
+  async function handleGoogleAuth(marketingConsent: boolean, allowRegistration = true, consentAccepted = false) {
+    try {
+      const credential = await loginWithGoogle();
+      const existing = await getUserProfile(credential.user.uid);
+      if (!existing && !allowRegistration) {
+        await logoutFromFirebase();
+        throw new Error('No encontramos una cuenta vinculada a Google. Regístrate primero desde “Regístrate”.');
+      }
+      if (!existing && !consentAccepted) {
+        setPendingGoogleRegistration({
+          uid: credential.user.uid,
+          name: credential.user.displayName || credential.user.email || 'Cliente',
+          email: credential.user.email || '',
+        });
+        setPage('register');
+        return;
+      }
+      const acceptedAt = new Date().toISOString();
+      const profile: User = existing
+        ? { ...existing, uid: undefined }
+        : {
+            name: credential.user.displayName || credential.user.email || 'Cliente',
+            email: credential.user.email || '',
+            phone: '',
+            role: 'client' as const,
+            privacyConsent: { accepted: true, version: currentPrivacyPolicyVersion(), acceptedAt, source: 'google' as const },
+            marketingConsent: { accepted: marketingConsent, ...(marketingConsent ? { acceptedAt } : {}) },
+          };
+      if (!existing) {
+        const { uid: _uid, ...profileToSave } = profile;
+        await saveUserProfile(credential.user.uid, profileToSave);
+      }
+      const role = profile.role || 'client';
+      setRole(role);
+      setUser({ ...profile, role, uid: credential.user.uid });
+      setAdminBranchId(role === 'branchAdmin' ? profile.branchId ?? 'main' : 'main');
+      setBranchId(role === 'branchAdmin' ? profile.branchId ?? 'main' : branchId);
+      setPage(role === 'admin' || role === 'branchAdmin' ? 'admin-dashboard' : role === 'worker' ? 'worker-today' : 'home');
+      showNotification(existing ? 'Sesión iniciada con Google.' : 'Cuenta de cliente creada con Google.');
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code === 'auth/account-exists-with-different-credential') {
+        throw new Error('Ya existe una cuenta con ese correo. Inicia sesión con correo y contraseña y vincula Google desde tu perfil.');
+      }
+      if (code === 'auth/operation-not-allowed') {
+        throw new Error('El inicio con Google no está habilitado en Firebase. El administrador debe activarlo en Authentication → Método de acceso → Google y guardar los cambios.');
+      }
+      throw error;
+    }
+  }
+
+  async function completeGoogleRegistration(marketingConsent: boolean) {
+    const currentUser = auth.currentUser;
+    if (!pendingGoogleRegistration || currentUser?.uid !== pendingGoogleRegistration.uid) {
+      throw new Error('Tu sesión de Google expiró. Vuelve a continuar con Google para registrarte.');
+    }
+
+    const acceptedAt = new Date().toISOString();
+    const profile: User = {
+      name: pendingGoogleRegistration.name,
+      email: pendingGoogleRegistration.email,
+      phone: '',
+      role: 'client',
+      privacyConsent: { accepted: true, version: currentPrivacyPolicyVersion(), acceptedAt, source: 'google' },
+      marketingConsent: { accepted: marketingConsent, ...(marketingConsent ? { acceptedAt } : {}) },
+    };
+    await saveUserProfile(pendingGoogleRegistration.uid, profile);
+    setRole('client');
+    setUser({ ...profile, uid: pendingGoogleRegistration.uid });
+    setPendingGoogleRegistration(null);
+    setPage('home');
+    showNotification('Cuenta de cliente creada con Google.');
+  }
+
+  async function cancelGoogleRegistration() {
+    await logoutFromFirebase();
+    setPendingGoogleRegistration(null);
+    setPage('login');
   }
 
   async function handleLogout() {
@@ -142,6 +244,13 @@ export default function App() {
 
   async function handleBookingConfirm(appt: any, selectedBranch: BranchId) {
     try {
+      const normalizedPhone = appt.contact.phone;
+      if (role === 'client' && user?.uid && user.phone !== normalizedPhone) {
+        const { uid: _uid, ...profile } = user;
+        const updatedProfile = { ...profile, phone: normalizedPhone };
+        await saveUserProfile(user.uid, updatedProfile);
+        setUser({ ...updatedProfile, uid: user.uid });
+      }
       await addAppointment({
       id: `a${Date.now()}`,
       clientName: appt.contact.name,
@@ -156,7 +265,8 @@ export default function App() {
       payments: appt.payments,
       total: appt.total,
       subservices: appt.subservices,
-      paymentProof: appt.paymentProof,
+      privacyConsent: appt.privacyConsent,
+      marketingConsent: appt.marketingConsent,
       createdAt: new Date().toISOString().slice(0, 10),
       ownerUid: auth.currentUser?.uid,
       branchId: selectedBranch,
@@ -206,16 +316,23 @@ export default function App() {
 
   if (noLayout) {
     return (
-      <div data-branch-theme={activeTheme} data-branch-id={branchId}>
-        {page === 'login' && <LoginPage setPage={setPage} onLogin={handleLogin} />}
-        {page === 'register' && <RegisterPage setPage={setPage} onRegister={handleRegister} />}
+      <div data-branch-theme={activeTheme} data-branch-id={branchId} style={{ '--color-primary': activeThemeColor } as React.CSSProperties}>
+        {page === 'login' && <LoginPage setPage={setPage} onLogin={handleLogin} onGoogle={() => handleGoogleAuth(false, true)} onPasswordRecovery={sendPasswordRecoveryEmail} />}
+        {page === 'register' && <RegisterPage
+          setPage={setPage}
+          onRegister={handleRegister}
+          onGoogle={(marketingConsent) => handleGoogleAuth(marketingConsent, true, true)}
+          googleRegistration={pendingGoogleRegistration ? { name: pendingGoogleRegistration.name, email: pendingGoogleRegistration.email } : undefined}
+          onCompleteGoogleRegistration={completeGoogleRegistration}
+          onCancelGoogleRegistration={cancelGoogleRegistration}
+        />}
         {notification && <Notification msg={notification.msg} type={notification.type} />}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen" data-page={page} data-branch-theme={activeTheme} data-branch-id={branchId} style={{ background: 'var(--color-bg)' }}>
+    <div className="min-h-screen" data-page={page} data-branch-theme={activeTheme} data-branch-id={activeBranch} style={{ background: 'var(--color-bg)', '--color-primary': activeThemeColor } as React.CSSProperties}>
       {/* Sidebar */}
       <Sidebar role={role} page={page} setPage={setPage} userName={user?.name} />
 
@@ -226,16 +343,16 @@ export default function App() {
         {page !== 'home' && <Header page={page} role={role} userName={user?.name} onLogout={handleLogout} />}
 
         <main className={page === 'home' ? 'max-w-none p-0' : 'max-w-[1400px] p-5 sm:p-6 lg:p-7'}>
-          {role === 'admin' && page.startsWith('admin-') && (
+          {(role === 'admin' || role === 'branchAdmin') && page.startsWith('admin-') && (
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
               <div>
                 <div className="text-xs font-700 text-[var(--color-text)]">Vista de sucursal</div>
-                <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">Consulta las citas, pagos y disponibilidad de cada sucursal por separado.</div>
+                <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">{role === 'admin' ? 'Consulta las citas, pagos y disponibilidad de cada sucursal por separado.' : `Acceso limitado a ${BRANCH_LABEL[user?.branchId ?? 'main']}.`}</div>
               </div>
-              <div className="flex gap-2" role="group" aria-label="Seleccionar sucursal para administración">
+              {role === 'admin' && <div className="flex gap-2" role="group" aria-label="Seleccionar sucursal para administración">
                 {([
-                  { id: 'main' as const, label: 'Sucursal principal' },
-                  { id: 'north' as const, label: 'Sucursal Norte' },
+                  { id: 'main' as const, label: BRANCH_LABEL.main },
+                  { id: 'north' as const, label: BRANCH_LABEL.north },
                 ]).map(branch => (
                   <button
                     key={branch.id}
@@ -249,7 +366,7 @@ export default function App() {
                     {branch.label}
                   </button>
                 ))}
-              </div>
+              </div>}
             </div>
           )}
           <PageContent
@@ -265,6 +382,7 @@ export default function App() {
             setBookingService={setBookingService}
             onBookingConfirm={handleBookingConfirm}
             onUpdateUser={setUser}
+            isGoogleRegistrationPending={pendingGoogleRegistration !== null}
           />
         </main>
       </div>
@@ -286,18 +404,22 @@ interface PageContentProps {
   setBookingService: (s: Service | undefined) => void;
   onBookingConfirm: (appt: any, branchId: BranchId) => Promise<void>;
   onUpdateUser: (u: User) => void;
+  isGoogleRegistrationPending: boolean;
 }
 
-function PageContent({ page, role, user, setPage, branchId, adminBranchId, onSelectBranch, bookingService, setBookingService, onBookingConfirm, onUpdateUser }: PageContentProps) {
+function PageContent({ page, role, user, setPage, branchId, adminBranchId, onSelectBranch, bookingService, setBookingService, onBookingConfirm, onUpdateUser, isGoogleRegistrationPending }: PageContentProps) {
   const adminPages: Page[] = ['admin-dashboard', 'admin-appointments', 'admin-calendar', 'admin-availability', 'admin-catalog', 'admin-specialized', 'admin-gallery', 'admin-payments', 'admin-stats', 'admin-settings'];
-  if (adminPages.includes(page) && role !== 'admin') return <AccessDenied />;
+  const branchAdminPages: Page[] = ['admin-dashboard', 'admin-appointments', 'admin-calendar', 'admin-availability', 'admin-payments', 'admin-stats'];
+  if (adminPages.includes(page) && role !== 'admin' && !(role === 'branchAdmin' && branchAdminPages.includes(page))) return <AccessDenied />;
   if (page === 'worker-today' && role !== 'worker') return <AccessDenied />;
 
   switch (page) {
     case 'home':
       return <HomePage setPage={setPage} role={role} setBookingService={setBookingService} branchId={branchId} onSelectBranch={onSelectBranch} />;
-    case 'catalog':
-      return <CatalogPage setPage={setPage} setBookingService={setBookingService} />;
+      case 'catalog':
+        return <CatalogPage setPage={setPage} setBookingService={setBookingService} />;
+      case 'gallery':
+        return <GalleryPage setPage={setPage} />;
     case 'booking':
       return (
         <BookingPage
@@ -339,6 +461,11 @@ function PageContent({ page, role, user, setPage, branchId, adminBranchId, onSel
       return <AdminStatsPage branchId={adminBranchId} />;
     case 'admin-settings':
       return <AdminSettingsPage branchId={adminBranchId} />;
+    case 'privacy':
+      return <PrivacyPolicyPage
+        setPage={nextPage => setPage(isGoogleRegistrationPending && nextPage === 'home' ? 'register' : nextPage)}
+        role={role}
+      />;
 
     default:
       return (

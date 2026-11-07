@@ -7,8 +7,10 @@ import {
   appointmentReceivedMessage,
   appointmentReminderMessage,
   appointmentTimestamp,
+  formatAppointmentTemplate,
   isAppointmentReminderDue,
   normalizePhone,
+  serializeWhatsAppId,
 } from "./notifications.js"
 
 test("normalizes Mexican ten-digit and legacy mobile numbers", () => {
@@ -21,6 +23,13 @@ test("preserves a valid international phone number and rejects invalid lengths",
   assert.equal(normalizePhone("+1 (415) 555-2671"), "14155552671@c.us")
 
   assert.equal(normalizePhone("12345"), null)
+})
+
+test("serializes WhatsApp contact IDs returned by getNumberId", () => {
+  assert.equal(serializeWhatsAppId("123@lid"), "123@lid")
+  assert.equal(serializeWhatsAppId({ _serialized: "123@c.us" }), "123@c.us")
+  assert.equal(serializeWhatsAppId({ user: "123", server: "lid" }), "123@lid")
+  assert.equal(serializeWhatsAppId(null), null)
 })
 
 test("builds all three appointment messages using the client first name", () => {
@@ -40,6 +49,10 @@ test("builds all three appointment messages using the client first name", () => 
 
   const confirmation = appointmentConfirmedMessage(appointment)
 
+  assert.equal(
+    confirmation,
+    "💅✨ ¡Hola Ana! Tu cita ha sido *confirmada*. 🩷\n\nTe esperamos en la fecha y hora seleccionadas:\n📅 Fecha: 17/10/2026\n🕐 Hora: 12:00\n\nAgradecemos mucho tu preferencia y confianza. ¡Nos vemos pronto! ✨",
+  )
   assert.match(confirmation, /Hola Ana!/)
 
   assert.match(confirmation, /17\/10\/2026/)
@@ -50,6 +63,10 @@ test("builds all three appointment messages using the client first name", () => 
 
   const reminder = appointmentReminderMessage(appointment)
 
+  assert.equal(
+    reminder,
+    "💅✨ ¡Hola Ana! Te recordamos que tienes una cita próximamente.\n\n📅 Fecha: 17/10/2026\n🕐 Hora: 12:00\n\nPor favor, confírmanos tu asistencia respondiendo a este mensaje con un “Sí, asistiré”. 💖\n\n¡Te esperamos! Gracias por tu preferencia. ✨",
+  )
   assert.match(reminder, /Hola Ana!/)
 
   assert.match(reminder, /17\/10\/2026/)
@@ -57,6 +74,25 @@ test("builds all three appointment messages using the client first name", () => 
   assert.match(reminder, /12:00/)
 
   assert.match(reminder, /Sí, asistiré/)
+})
+
+test("capitalizes the first name in appointment messages", () => {
+  assert.match(appointmentReceivedMessage({ clientName: "dwad lopez" }), /¡Hola Dwad!/)
+})
+
+test("renders only the supported appointment template placeholders", () => {
+  const message = formatAppointmentTemplate(
+    "Hola {firstName}, tu {service} es el {date} a las {time}.",
+    {
+      clientName: "Ana López",
+      date: "2026-10-17",
+      time: "12:00",
+      services: [{ name: "Gel" }, { name: "Diseño" }],
+    },
+  )
+
+  assert.equal(message, "Hola Ana, tu Gel, Diseño es el 17/10/2026 a las 12:00.")
+  assert.equal(formatAppointmentTemplate("{unsupported}", {}), "{unsupported}")
 })
 
 test("converts appointment local time to the configured Mexico City timezone", () => {

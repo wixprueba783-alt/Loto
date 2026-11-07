@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Camera, Edit3, Check, X } from 'lucide-react';
-import { APPOINTMENTS, MONTHS } from '../data';
+import { APPOINTMENTS, MONTHS, isAppointmentPriceVisible } from '../data';
+import { auth, linkGoogleToCurrentAccount } from '../firebase';
 import { AppointmentBadge } from '../components/StatusBadge';
 import type { BranchId, User } from '../types';
 
@@ -13,7 +14,14 @@ function formatDate(d: string) {
 
 export function ProfilePage({ user, branchId, onUpdate }: Props) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState(user);
+  const [form, setForm] = useState<Pick<User, 'name' | 'email' | 'phone'>>({
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+  });
+  const [googleLinkMessage, setGoogleLinkMessage] = useState('');
+  const [googleLinkBusy, setGoogleLinkBusy] = useState(false);
+  const hasGoogleProvider = auth.currentUser?.providerData.some(provider => provider.providerId === 'google.com') ?? false;
 
   const myAppts = APPOINTMENTS
     .filter(a => (a.branchId ?? 'main') === branchId && a.status !== 'cancelled' && (user.uid ? a.ownerUid === user.uid : a.clientEmail === user.email))
@@ -22,12 +30,29 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
     total: myAppts.length,
     completed: myAppts.filter(a => a.status === 'completed').length,
     upcoming: myAppts.filter(a => a.status === 'confirmed' || a.status === 'pending').length,
-    spent: myAppts.filter(a => a.status === 'completed').reduce((s, a) => s + a.total, 0),
+    spent: myAppts.filter(a => a.status === 'completed' && isAppointmentPriceVisible(a)).reduce((s, a) => s + a.total, 0),
+    hasHiddenPrices: myAppts.some(a => a.status === 'completed' && !isAppointmentPriceVisible(a)),
   };
 
   function save() {
-    onUpdate(form);
+    onUpdate({ ...user, ...form });
     setEditing(false);
+  }
+
+  async function linkGoogle() {
+    setGoogleLinkMessage('');
+    setGoogleLinkBusy(true);
+    try {
+      await linkGoogleToCurrentAccount();
+      setGoogleLinkMessage('Google quedó vinculado a esta cuenta.');
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      setGoogleLinkMessage(code === 'auth/credential-already-in-use' || code === 'auth/email-already-in-use'
+        ? 'Ese correo de Google ya pertenece a otra cuenta. Inicia sesión con esa cuenta para evitar duplicados.'
+        : error instanceof Error ? error.message : 'No se pudo vincular Google.');
+    } finally {
+      setGoogleLinkBusy(false);
+    }
   }
 
   return (
@@ -87,7 +112,7 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
             { label: 'Total citas', value: stats.total },
             { label: 'Completadas', value: stats.completed },
             { label: 'Próximas', value: stats.upcoming },
-            { label: 'Gastado', value: `$${stats.spent}` },
+            { label: 'Gastado', value: stats.hasHiddenPrices ? 'Parcial' : `$${stats.spent}` },
           ].map((s, i) => (
             <div key={i} className="text-center">
               <div className="text-lg font-700 text-[#C1536A]">{s.value}</div>
@@ -96,6 +121,19 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
           ))}
         </div>
       </div>
+
+      {!hasGoogleProvider && (
+        <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
+          <div>
+            <h3 className="font-700 text-[var(--color-text)]">Vincular Google</h3>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">Conecta Google con esta cuenta para iniciar sesión sin crear un perfil duplicado.</p>
+            {googleLinkMessage && <p className="mt-2 text-xs text-[var(--color-text-muted)]" role="status">{googleLinkMessage}</p>}
+          </div>
+          <button type="button" className="btn-secondary" disabled={googleLinkBusy} onClick={() => void linkGoogle()}>
+            {googleLinkBusy ? 'Vinculando...' : 'Vincular con Google'}
+          </button>
+        </div>
+      )}
 
       {/* Appointment history */}
       <div className="card overflow-hidden">
@@ -115,7 +153,7 @@ export function ProfilePage({ user, branchId, onUpdate }: Props) {
                 </div>
               </div>
               <div className="flex items-center justify-between sm:justify-end gap-4 sm:min-w-[190px]">
-                <span className="text-lg font-700 text-[#C1536A]">${appt.total}</span>
+                <span className="text-lg font-700 text-[#C1536A]">{isAppointmentPriceVisible(appt) ? `$${appt.total}` : 'A consultar'}</span>
                 <AppointmentBadge status={appt.status} />
               </div>
             </div>

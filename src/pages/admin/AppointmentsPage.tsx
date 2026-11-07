@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Eye, Check, X, Edit2, Ban, CheckCircle2, Search, Printer, FileDown, CalendarDays, ChevronLeft, ChevronRight, Bell } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { APPOINTMENTS, BUSINESS_SETTINGS, MONTHS, finalizeAppointmentPaymentWithTicketFolio, getWorkers, loadAdminAppointments, requestAppointmentReminder, subscribeAdminAppointments, updateAppointmentStatus, updateAppointmentWorker } from '../../data';
+import { APPOINTMENTS, BRANCH_LABEL, BUSINESS_SETTINGS, MONTHS, finalizeAppointmentPaymentWithTicketFolio, getWorkers, loadAdminAppointments, subscribeAdminAppointments, updateAppointmentStatus, updateAppointmentWorker } from '../../data';
+import { auth } from '../../firebase';
+import { whatsappApiUrl } from '../../whatsapp-api';
 import { AppointmentBadge } from '../../components/StatusBadge';
 import { Modal } from '../../components/Modal';
-import { ticketToRawBtUrl, splitTaxInclusivePrice } from '../../ticket';
+import { loadTicketLogo, ticketToRawBtUrl, splitTaxInclusivePrice } from '../../ticket';
 import type { PrintableTicket } from '../../ticket';
 import type { Appointment, AppointmentStatus, BranchId, PaymentMethod, User } from '../../types';
 
@@ -15,7 +17,8 @@ function formatDate(d: string) {
 
 const methodLabel: Record<string, string> = { cash: 'Efectivo', transfer: 'Transf.', card: 'Tarjeta' };
 
-function downloadTicketPdf(ticket: PrintableTicket) {
+async function downloadTicketPdf(ticket: PrintableTicket) {
+  const logo = await loadTicketLogo();
   const { subtotal, tax, total } = splitTaxInclusivePrice(ticket.total);
   const width = 80;
   const margin = 5;
@@ -63,7 +66,8 @@ function downloadTicketPdf(ticket: PrintableTicket) {
   ];
 
   const measurePdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [width, 250] });
-  let pageHeight = 7;
+  const logoSize = 30;
+  let pageHeight = logoSize + 11;
   rows.forEach(row => {
     if (row.type === 'divider') {
       pageHeight += 5;
@@ -77,7 +81,8 @@ function downloadTicketPdf(ticket: PrintableTicket) {
   });
 
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [width, pageHeight + 5] });
-  let y = 7;
+  pdf.addImage(logo, 'PNG', (width - logoSize) / 2, 4, logoSize, logoSize);
+  let y = logoSize + 8;
   rows.forEach(row => {
     if (row.type === 'divider') {
       y += 1;
@@ -131,6 +136,7 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
   const [paymentConfirmAppt, setPaymentConfirmAppt] = useState<Appointment | null>(null);
   const [paymentSplits, setPaymentSplits] = useState<{ method: PaymentMethod; amount: number }[]>([]);
   const [paymentTotal, setPaymentTotal] = useState<number>(0);
+  const [paymentTotalInput, setPaymentTotalInput] = useState('0');
   const [paymentNote, setPaymentNote] = useState('');
   const [ticketOutput, setTicketOutput] = useState<'pdf' | 'rawbt'>('pdf');
   const [paymentSaving, setPaymentSaving] = useState(false);
@@ -142,17 +148,17 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
   const [workers, setWorkers] = useState<User[]>([]);
   const [loadError, setLoadError] = useState('');
   const [reminderSending, setReminderSending] = useState(false);
-  const [reminderFeedback, setReminderFeedback] = useState('');
+  const [reminderMessage, setReminderMessage] = useState('');
   const [reminderError, setReminderError] = useState('');
 
   useEffect(() => {
-    getWorkers().then(setWorkers).catch(() => setWorkers([]));
-    loadAdminAppointments()
+    getWorkers(branchId).then(setWorkers).catch(error => setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar las trabajadoras.'));
+    loadAdminAppointments(branchId)
       .then(appointments => setAppts([...appointments]))
       .catch(error => setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar las citas.'));
     const unsubscribe = subscribeAdminAppointments(() => setAppts([...APPOINTMENTS]));
     return () => unsubscribe();
-  }, []);
+  }, [branchId]);
 
   useEffect(() => {
     if (!datePickerOpen) return;
@@ -222,16 +228,32 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
     }
   }
 
-  async function sendAppointmentReminder(appointment: Appointment) {
+  async function sendManualReminder(appointment: Appointment) {
     if (reminderSending) return;
     setReminderSending(true);
-    setReminderFeedback('');
+    setReminderMessage('');
     setReminderError('');
     try {
-      await requestAppointmentReminder(appointment.id);
-      setReminderFeedback('Recordatorio solicitado. Se enviará por WhatsApp en breve.');
+      const currentUser = auth.currentUser;
+      if (!currentUser || currentUser.isAnonymous) {
+        throw new Error('Inicia sesión como administrador para enviar recordatorios.');
+      }
+      const token = await currentUser.getIdToken();
+      const response = await fetch(whatsappApiUrl('reminder'), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ appointmentId: appointment.id }),
+      });
+      const result = await response.json() as { message?: string };
+      if (!response.ok) {
+        throw new Error(result.message || 'No se pudo enviar el recordatorio.');
+      }
+      setReminderMessage('Recordatorio enviado por WhatsApp.');
     } catch (error) {
-      setReminderError(error instanceof Error ? error.message : 'No se pudo solicitar el recordatorio.');
+      setReminderError(error instanceof Error ? error.message : 'No se pudo enviar el recordatorio.');
     } finally {
       setReminderSending(false);
     }
@@ -240,6 +262,7 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
   function openPaymentConfirmation(appt: Appointment) {
     setPaymentConfirmAppt(appt);
     setPaymentTotal(appt.total);
+    setPaymentTotalInput(String(appt.total));
     setPaymentSplits([{ method: appt.payments[0]?.method ?? 'cash', amount: appt.total }]);
     setPaymentNote(appt.notes || '');
     setTicketOutput('pdf');
@@ -269,8 +292,10 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
     setPaymentSplits(current => [...current, { method: nextMethod, amount: 0 }]);
   }
 
-  function updatePaymentTotal(value: number) {
-    const nextTotal = Math.max(0, value);
+  function updatePaymentTotal(rawValue: string) {
+    if (!/^\d*\.?\d{0,2}$/.test(rawValue)) return;
+    setPaymentTotalInput(rawValue);
+    const nextTotal = Math.max(0, Number(rawValue) || 0);
     setPaymentTotal(nextTotal);
     setPaymentSplits(current => current.map((payment, index) => index === current.length - 1
       ? { ...payment, amount: Math.max(0, Math.round((nextTotal - current.slice(0, -1).reduce((sum, item) => sum + item.amount, 0)) * 100) / 100) }
@@ -288,7 +313,7 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
     setPaymentSaveError('');
     try {
       const payments = paymentSplits.filter(payment => payment.amount > 0);
-      const folio = await finalizeAppointmentPaymentWithTicketFolio(appointment.id, payments, paymentNote, paymentTotal);
+      const folio = await finalizeAppointmentPaymentWithTicketFolio(appointment.id, payments, paymentNote, paymentTotal, branchId);
 
       const paidAppointment: Appointment = {
         ...appointment,
@@ -321,10 +346,15 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
       setTicketToPrint(ticket);
       if (output === 'rawbt') {
         setTicketActionMessage('Abriendo RawBT...');
-        window.location.href = ticketToRawBtUrl(ticket);
+        try {
+          window.location.href = await ticketToRawBtUrl(ticket);
+        } catch (error) {
+          setTicketActionMessage('');
+          setTicketActionError(error instanceof Error ? error.message : 'No se pudo abrir RawBT.');
+        }
       } else {
         try {
-          downloadTicketPdf(ticket);
+          await downloadTicketPdf(ticket);
           setTicketActionMessage('Descarga del PDF iniciada.');
         } catch (error) {
           setTicketActionError(error instanceof Error ? error.message : 'No se pudo iniciar la descarga del PDF.');
@@ -472,7 +502,7 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
               {filtered.map(appt => (
                 <tr key={appt.id} className="table-row">
                   <td className="px-4 py-3 text-xs font-600 text-[#BBA9AD]">{appt.id}</td>
-                  <td className="px-4 py-3 text-xs text-[#6B5A5E] whitespace-nowrap">{appt.branchId === 'north' ? 'Sucursal Norte' : 'Sucursal principal'}</td>
+                  <td className="px-4 py-3 text-xs text-[#6B5A5E] whitespace-nowrap">{BRANCH_LABEL[appt.branchId ?? 'main']}</td>
                   <td className="px-4 py-3">
                     <div className="font-600 text-[#1A1012] whitespace-nowrap">{appt.clientName}</div>
                     <div className="text-xs text-[#BBA9AD]">{appt.clientPhone}</div>
@@ -488,7 +518,7 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <button title="Ver" className="btn-ghost p-1.5 text-[#6B5A5E]" onClick={() => {
-                        setReminderFeedback('');
+                        setReminderMessage('');
                         setReminderError('');
                         setViewAppt(appt);
                       }}>
@@ -532,8 +562,6 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
       {viewAppt && (
         <Modal title={`Cita ${viewAppt.id}`} onClose={() => setViewAppt(null)} size="md">
           <div className="space-y-4">
-            {reminderFeedback && <p role="status" className="text-sm text-emerald-700">{reminderFeedback}</p>}
-            {reminderError && <p role="alert" className="text-sm text-red-600">{reminderError}</p>}
             <div className="grid grid-cols-2 gap-3">
               <InfoField label="Cliente" value={viewAppt.clientName} />
               <InfoField label="Teléfono" value={viewAppt.clientPhone} />
@@ -598,9 +626,6 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
             )}
             {viewAppt.status === 'confirmed' && (
               <div className="space-y-2 pt-2 border-t border-[#F5EDE6]">
-                <button className="btn-secondary w-full justify-center" onClick={() => void sendAppointmentReminder(viewAppt)} disabled={reminderSending}>
-                  <Bell size={15} /> {reminderSending ? 'Enviando...' : 'Recordatorio'}
-                </button>
                 <div className="flex gap-2">
                   <button className="btn-primary flex-1 justify-center" onClick={() => openPaymentConfirmation(viewAppt)}>
                     <CheckCircle2 size={15} /> Confirmar pago
@@ -609,6 +634,16 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
                     <Ban size={15} /> Cancelar
                   </button>
                 </div>
+                <button
+                  type="button"
+                  className="btn-secondary w-full justify-center"
+                  onClick={() => void sendManualReminder(viewAppt)}
+                  disabled={reminderSending}
+                >
+                  <Bell size={15} /> {reminderSending ? 'Enviando recordatorio...' : 'Enviar recordatorio manual'}
+                </button>
+                {reminderMessage && <p className="text-xs text-emerald-600" role="status">{reminderMessage}</p>}
+                {reminderError && <p className="text-xs text-red-600" role="alert">{reminderError}</p>}
               </div>
             )}
           </div>
@@ -645,7 +680,8 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
                         <span className="sr-only">Importe de {methodLabel[payment.method]}</span>
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#6B5A5E]">$</span>
                         <input
-                          className="input-field pl-7"
+                          className="input-field"
+                          style={{ paddingInlineStart: '2.75rem' }}
                           type="number"
                           min="0"
                           step="0.01"
@@ -722,20 +758,29 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
                       <div className="text-[10px] uppercase tracking-wide text-[#BBA9AD]">Total</div>
                       <div className="font-700 text-[#C1536A]">${paymentTotal}</div>
                     </div>
-                    <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setShowPriceEditor(true)}>
+                    <button className="btn-ghost px-2 py-1 text-xs" onClick={() => {
+                      setPaymentTotalInput(String(paymentTotal));
+                      setShowPriceEditor(true);
+                    }}>
                       Editar precio
                     </button>
                   </div>
                 ) : (
                   <div>
                     <label className="block text-xs font-600 text-[#3D2A2F] mb-1.5">Editar total</label>
-                    <input
-                      type="number"
-                      min="0"
-                      className="input-field"
-                      value={paymentTotal}
-                      onChange={e => updatePaymentTotal(Number(e.target.value || 0))}
-                    />
+                    <label className="relative block">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#6B5A5E]">$</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className="input-field"
+                        style={{ paddingInlineStart: '2.75rem' }}
+                        value={paymentTotalInput}
+                        onChange={event => updatePaymentTotal(event.target.value)}
+                        onBlur={() => setPaymentTotalInput(String(paymentTotal))}
+                        aria-label="Editar total de la cita"
+                      />
+                    </label>
                   </div>
                 )}
 
@@ -755,7 +800,7 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
               <button
                 className="btn-primary flex-1 justify-center"
                 disabled={paymentSaving || !paymentSplitMatchesTotal || paymentTotal <= 0}
-                onClick={proceedToPayment}
+                onClick={() => void proceedToPayment()}
               >
                 <Check size={15} /> {paymentSaving ? 'Guardando pago...' : 'Proceder al pago'}
               </button>
@@ -785,11 +830,11 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   className={`btn-primary justify-center ${ticketOutput === 'pdf' ? 'ring-2 ring-[#D99A9F] ring-offset-2 ring-offset-[#1A181B]' : ''}`}
-                  onClick={() => {
+                  onClick={async () => {
                     setTicketOutput('pdf');
                     setTicketActionError('');
                     try {
-                      downloadTicketPdf(ticketToPrint);
+                      await downloadTicketPdf(ticketToPrint);
                       setTicketActionMessage('Descarga del PDF iniciada.');
                     } catch (error) {
                       setTicketActionError(error instanceof Error ? error.message : 'No se pudo generar el PDF.');
@@ -801,12 +846,12 @@ export function AdminAppointmentsPage({ branchId }: { branchId: BranchId }) {
                 <button
                   type="button"
                   className={`btn-secondary justify-center ${ticketOutput === 'rawbt' ? 'ring-2 ring-[#D99A9F] ring-offset-2 ring-offset-[#1A181B]' : ''}`}
-                  onClick={() => {
+                  onClick={async () => {
                     setTicketOutput('rawbt');
                     setTicketActionError('');
                     setTicketActionMessage('Abriendo RawBT...');
                     try {
-                      window.location.href = ticketToRawBtUrl(ticketToPrint);
+                      window.location.href = await ticketToRawBtUrl(ticketToPrint);
                     } catch (error) {
                       setTicketActionError(error instanceof Error ? error.message : 'No se pudo abrir RawBT.');
                     }

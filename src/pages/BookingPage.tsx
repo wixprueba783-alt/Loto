@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, Clock, Calendar, ChevronRight, ChevronLeft, Banknote, CreditCard, ArrowLeft, Minus, Plus } from 'lucide-react';
-import { SERVICES, SERVICE_SUBSERVICES, BLOCKED_DAYS, MONTHS, WEEKDAYS, getAvailableTimes, getAvailability, refreshBusySlots } from '../data';
+import { BUSINESS_SETTINGS, SERVICES, SERVICE_SUBSERVICES, BLOCKED_DAYS, MONTHS, WEEKDAYS, currentPrivacyPolicyVersion, getAvailableTimes, getAvailability, refreshBusySlots } from '../data';
 import type { Page, Service, Role, PaymentMethod, BranchId, Appointment } from '../types';
 
 interface Props {
@@ -19,7 +19,8 @@ interface Props {
     total: number;
     subservices: NonNullable<Appointment['subservices']>;
     duration: number;
-    paymentProof?: string;
+    privacyConsent: NonNullable<Appointment['privacyConsent']>;
+    marketingConsent: NonNullable<Appointment['marketingConsent']>;
   }) => Promise<void>;
 }
 
@@ -48,8 +49,10 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
     phone: getMexicanPhoneDigits(user?.phone),
   });
   const [payments, setPayments] = useState<{ method: PaymentMethod; amount: string }[]>([{ method: 'cash', amount: initialService ? String(initialService.price) : '0' }]);
-  const [proofFile, setProofFile] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [phoneValidationAttempted, setPhoneValidationAttempted] = useState(false);
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [bookingError, setBookingError] = useState('');
   const [, setClock] = useState(Date.now());
@@ -91,11 +94,15 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
       name: subservice.name,
       pricePerNail: subservice.pricePerNail,
       quantity: selectedSubservices[subservice.id],
+      showPrice: subservice.showPrice ?? true,
     }));
   const addOnsTotal = selectedAddOns.reduce((sum, subservice) => sum + subservice.pricePerNail * subservice.quantity, 0);
   const servicesTotal = selectedServices.reduce((sum, selected) => sum + selected.price, 0);
   const bookingDuration = selectedServices.reduce((sum, selected) => sum + selected.duration, 0);
   const bookingTotal = Math.round(((servicesTotal + addOnsTotal + Number.EPSILON) * 100)) / 100;
+  const showBookingPrices =
+    selectedServices.every(selected => selected.showPrice ?? true) &&
+    selectedAddOns.every(addOn => addOn.showPrice);
 
   // Calendar helpers
   const firstDay = new Date(year, month, 1).getDay();
@@ -139,7 +146,8 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
       contact: { ...contact, phone: `+52${getMexicanPhoneDigits(contact.phone)}` }, payments: [],
       total: bookingTotal,
       subservices: selectedAddOns,
-      paymentProof: role === 'admin' && selectedPaymentMethod === 'transfer' ? proofFile || undefined : undefined,
+      privacyConsent: { accepted: true, version: currentPrivacyPolicyVersion(), acceptedAt: new Date().toISOString(), source: 'booking' as const },
+      marketingConsent: { accepted: marketingConsent, ...(marketingConsent ? { acceptedAt: new Date().toISOString() } : {}) },
     };
     try {
       await onConfirm(appt);
@@ -167,19 +175,19 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
             Te notificaremos por correo electrónico.
           </p>
           <div className="bg-[#FFF1F3] rounded-xl p-4 text-left space-y-2.5 mb-6">
-            {selectedServices.map(selected => <Row key={selected.id} label={selected.name} value={`$${selected.price.toFixed(2)}`} />)}
+            {selectedServices.map(selected => (selected.showPrice ?? true) ? <Row key={selected.id} label={selected.name} value={`$${selected.price.toFixed(2)}`} /> : <Row key={selected.id} label={selected.name} value="Precio a consultar" />)}
             {selectedAddOns.map(addOn => (
               <Row
                 key={addOn.id}
                 label={`${addOn.name} · ${addOn.quantity} ${addOn.quantity === 1 ? 'uña' : 'uñas'}`}
-                value={`$${(addOn.pricePerNail * addOn.quantity).toFixed(2)}`}
+                value={addOn.showPrice ? `$${(addOn.pricePerNail * addOn.quantity).toFixed(2)}` : 'Precio a consultar'}
               />
             ))}
             <Row label="Fecha" value={formatDate(selectedDate)} />
             <Row label="Hora" value={selectedTime} />
             <Row label="Duración" value={`${bookingDuration} min`} />
-            <Row label="Total" value={`$${bookingTotal.toFixed(2)}`} />
-            <Row label="Pago" value={payments.map(p => `${methodLabel(p.method)}: $${p.amount || 0}`).join(' + ')} />
+            {showBookingPrices && <Row label="Total aproximado" value={`$${bookingTotal.toFixed(2)}`} />}
+            {showBookingPrices && <Row label="Pago" value={payments.map(p => `${methodLabel(p.method)}: $${p.amount || 0}`).join(' + ')} />}
             <div className="flex justify-between items-center">
               <span className="text-xs text-[#6B5A5E]">Estado</span>
               <span className="text-xs font-600 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Pendiente</span>
@@ -228,7 +236,7 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
             <h2 className="text-xl font-700 text-[#1A1012] mb-2" style={{ fontFamily: 'var(--font-display)' }}>
               ¿Qué servicio deseas?
             </h2>
-            <p className="mb-4 text-sm text-[var(--color-text-muted)]">Puedes elegir varios servicios. El precio y el tiempo se suman automáticamente.</p>
+            <p className="mb-4 text-sm text-[var(--color-text-muted)]">Puedes elegir varios servicios. La duración se suma automáticamente.</p>
             <h3 className="mb-3 text-sm font-700 text-[var(--color-text)]">Selecciona uno o más servicios</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {SERVICES.filter(s => s.active).map(s => (
@@ -251,7 +259,7 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
                       <div className="font-600 text-sm text-[var(--color-text)]">{s.name}</div>
                       <div className="text-xs text-[var(--color-text-muted)] line-clamp-1 mt-0.5">{s.description}</div>
                       <div className="flex items-center gap-3 mt-1.5">
-                        <span className="text-sm font-700 text-[var(--color-primary)]">${s.price}</span>
+                        <span className="text-sm font-700 text-[var(--color-primary)]">{(s.showPrice ?? true) ? `$${s.price}` : 'Precio a consultar'}</span>
                         <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1"><Clock size={11} />{s.duration} min</span>
                       </div>
                     </div>
@@ -267,7 +275,7 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
             {service && (
               <div className="mt-5 flex flex-wrap justify-between gap-2 rounded-xl bg-[var(--color-surface-muted)] p-4 text-sm">
                 <span className="text-[var(--color-text-muted)]">{selectedServices.length} servicio(s) · {bookingDuration} min</span>
-                <strong className="text-[var(--color-primary)]">${servicesTotal.toFixed(2)}</strong>
+                <strong className="text-[var(--color-primary)]">{showBookingPrices ? `$${servicesTotal.toFixed(2)}` : 'Precio a consultar'}</strong>
               </div>
             )}
             <div className="mt-6 flex justify-end">
@@ -284,7 +292,7 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
             <h2 className="text-xl font-700 text-[#1A1012] mb-2" style={{ fontFamily: 'var(--font-display)' }}>
               Servicios especializados
             </h2>
-            <p className="mb-5 text-sm text-[var(--color-text-muted)]">Elige los detalles que deseas. El precio se cobra por uña; indica cuántas uñas llevarán cada detalle.</p>
+            <p className="mb-5 text-sm text-[var(--color-text-muted)]">Elige los detalles que deseas e indica cuántas uñas llevarán cada detalle.</p>
             <div className="space-y-3">
               {SERVICE_SUBSERVICES.filter(item => item.active).map(item => {
                 const quantity = selectedSubservices[item.id] ?? 0;
@@ -294,7 +302,7 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-700 text-[var(--color-text)]">{item.name}</div>
                       {item.description && <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{item.description}</p>}
-                      <div className="mt-1 text-xs text-[var(--color-text-muted)]">${item.pricePerNail.toFixed(2)} por uña</div>
+                      <div className="mt-1 text-xs text-[var(--color-text-muted)]">{(item.showPrice ?? true) ? `$${item.pricePerNail.toFixed(2)} por uña` : 'Precio a consultar'}</div>
                     </div>
                     {quantity === 0 ? (
                       <button type="button" className="btn-secondary shrink-0 px-3 py-2 text-xs" onClick={() => setSelectedSubservices(current => ({ ...current, [item.id]: 1 }))}>Agregar</button>
@@ -311,9 +319,9 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
             </div>
             {SERVICE_SUBSERVICES.every(item => !item.active) && <p className="rounded-xl bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-muted)]">No hay servicios especializados disponibles. Puedes continuar sin extras.</p>}
             <div className="mt-5 space-y-2 rounded-xl bg-[var(--color-surface-muted)] p-4 text-sm">
-              {selectedServices.map(item => <div key={item.id} className="flex justify-between"><span>{item.name}</span><span>${item.price.toFixed(2)}</span></div>)}
-              {selectedAddOns.map(item => <div key={item.id} className="flex justify-between"><span>{item.name} × {item.quantity} {item.quantity === 1 ? 'uña' : 'uñas'}</span><span>${(item.pricePerNail * item.quantity).toFixed(2)}</span></div>)}
-              <div className="flex justify-between border-t border-[var(--color-border)] pt-2 font-700"><span>Total</span><span>${bookingTotal.toFixed(2)}</span></div>
+              {selectedServices.map(item => <div key={item.id} className="flex justify-between"><span>{item.name}</span><span>{(item.showPrice ?? true) ? `$${item.price.toFixed(2)}` : 'Precio a consultar'}</span></div>)}
+              {selectedAddOns.map(item => <div key={item.id} className="flex justify-between"><span>{item.name} × {item.quantity} {item.quantity === 1 ? 'uña' : 'uñas'}</span><span>{item.showPrice ? `$${(item.pricePerNail * item.quantity).toFixed(2)}` : 'Precio a consultar'}</span></div>)}
+              {showBookingPrices && <div className="flex justify-between border-t border-[var(--color-border)] pt-2 font-700"><span>Total aproximado</span><span>${bookingTotal.toFixed(2)}</span></div>}
             </div>
             <div className="mt-6 flex justify-between">
               <button className="btn-ghost" onClick={() => setStep(0)}><ChevronLeft size={16} /> Atrás</button>
@@ -434,17 +442,23 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
                     {field === 'name' ? 'Nombre completo' : field === 'email' ? 'Correo electrónico' : 'Teléfono'}
                   </label>
                   {field === 'phone' ? (
-                    <div className="flex">
-                      <span className="input-field rounded-r-none border-r-0 flex items-center text-[#6B5A5E]">+52</span>
-                      <input className="input-field rounded-l-none" type="tel"
-                        placeholder="81 1234 5678"
-                        value={contact.phone}
-                        maxLength={10}
-                        onChange={e => setContact(c => ({ ...c, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
-                        readOnly={role !== 'guest' && !!user}
-                        style={{ background: role !== 'guest' && user ? 'var(--color-surface)' : undefined }}
-                      />
-                    </div>
+                    <>
+                      <div className="flex">
+                        <span className="input-field rounded-r-none border-r-0 flex items-center text-[#6B5A5E]">+52</span>
+                        <input className="input-field rounded-l-none" type="tel"
+                          placeholder="81 1234 5678"
+                          value={contact.phone}
+                          maxLength={10}
+                          onChange={e => setContact(c => ({ ...c, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                          required
+                        />
+                      </div>
+                      {phoneValidationAttempted && getMexicanPhoneDigits(contact.phone).length !== 10 && (
+                        <p className="mt-1 text-xs text-red-600" role="alert">
+                          Por favor, introduce tu número de teléfono de 10 dígitos.
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <input className="input-field" type={field === 'email' ? 'email' : 'text'}
                       placeholder={field === 'name' ? 'Sofía Martínez' : 'sofia@email.com'}
@@ -457,11 +471,25 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
                 </div>
               ))}
             </div>
+            <div className="mt-5 space-y-3 rounded-xl border border-[var(--color-border)] p-4">
+              <label className="flex items-start gap-2 text-xs text-[var(--color-text-muted)]">
+                <input type="checkbox" checked={acceptedPrivacy} onChange={event => setAcceptedPrivacy(event.target.checked)} />
+                <span>He leído y acepto el <button type="button" className="text-[var(--color-primary)] underline" onClick={() => setPage('privacy')}>aviso de privacidad</button> para administrar esta reservación. Necesario para continuar.</span>
+              </label>
+              <label className="flex items-start gap-2 text-xs text-[var(--color-text-muted)]">
+                <input type="checkbox" checked={marketingConsent} onChange={event => setMarketingConsent(event.target.checked)} />
+                <span>Acepto recibir promociones y publicidad (opcional, no afecta la cita).</span>
+              </label>
+            </div>
             <div className="mt-6 flex justify-between">
               <button className="btn-ghost" onClick={() => setStep(3)}><ChevronLeft size={16} /> Atrás</button>
               <button className="btn-primary"
-                disabled={!contact.name || !contact.email || getMexicanPhoneDigits(contact.phone).length !== 10}
-                onClick={() => setStep(5)}>
+                onClick={() => {
+                  setPhoneValidationAttempted(true);
+                  if (getMexicanPhoneDigits(contact.phone).length !== 10) return;
+                  if (!contact.name || !contact.email || !acceptedPrivacy) return;
+                  setStep(5);
+                }}>
                 Continuar <ChevronRight size={16} />
               </button>
             </div>
@@ -474,10 +502,10 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
             <h2 className="text-xl font-700 text-[#1A1012] mb-2" style={{ fontFamily: 'var(--font-display)' }}>
               Método de pago
             </h2>
-            <div className="bg-[#FFF1F3] rounded-xl p-4 mb-5 flex items-center justify-between">
-              <span className="text-sm font-600 text-[#1A1012]">Total de la cita</span>
+            {showBookingPrices && <div className="bg-[#FFF1F3] rounded-xl p-4 mb-5 flex items-center justify-between">
+              <span className="text-sm font-600 text-[#1A1012]">Total aproximado</span>
               <span className="text-xl font-700 text-[#C1536A]">${bookingTotal.toFixed(2)}</span>
-            </div>
+            </div>}
 
             <div className="border border-[#EDD9CC] rounded-xl p-4 space-y-3">
               <div className="text-sm font-600 text-[#1A1012]">Selecciona el método</div>
@@ -496,34 +524,20 @@ export function BookingPage({ setPage, role, user, initialService, branchId, onC
             </div>
 
             <div className="mt-4 p-4 bg-[#F7F4F2] rounded-xl space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-[#6B5A5E]">Total</span>
+              {showBookingPrices && <div className="flex justify-between text-sm">
+                <span className="text-[#6B5A5E]">Total aproximado</span>
                 <span className="font-700 text-[#1A1012]">${bookingTotal.toFixed(2)}</span>
-              </div>
+              </div>}
               <div className="flex justify-between text-sm">
                 <span className="text-[#6B5A5E]">Método seleccionado</span>
                 <span className="font-600 text-[#C1536A]">{methodLabel(selectedPaymentMethod)}</span>
               </div>
             </div>
 
-            {role === 'admin' && selectedPaymentMethod === 'transfer' && (
-              <div className="mt-4">
-                <label className="block text-xs font-600 text-[#3D2A2F] mb-1.5">Comprobante de transferencia</label>
-                <input
-                  className="input-field text-sm"
-                  type="file"
-                  accept="image/*,.pdf"
-                  onChange={event => {
-                    const file = event.target.files?.[0];
-                    if (!file || file.size > 900 * 1024) return;
-                    const reader = new FileReader();
-                    reader.onload = () => setProofFile(String(reader.result));
-                    reader.readAsDataURL(file);
-                  }}
-                />
-                <p className="text-xs text-[#BBA9AD] mt-1">Máximo 900 KB. Se enviará a la administradora.</p>
-                {proofFile && <p className="text-xs text-emerald-600 mt-1">Comprobante adjuntado</p>}
-              </div>
+            {selectedPaymentMethod === 'transfer' && (
+              <p className="mt-4 text-xs text-[#6B5A5E]">
+                La administradora adjuntará el comprobante de transferencia a tu cita.
+              </p>
             )}
 
             <div className="mt-6 flex justify-between">

@@ -1,12 +1,13 @@
-export type Role = 'guest' | 'client' | 'admin' | 'worker';
+export type Role = 'guest' | 'client' | 'admin' | 'branchAdmin' | 'worker';
 
 export type Page =
   | 'home' | 'catalog' | 'booking' | 'login' | 'register'
   | 'my-appointments' | 'client-payments' | 'profile'
   | 'worker-today'
+  | 'gallery'
   | 'admin-dashboard' | 'admin-appointments' | 'admin-calendar'
   | 'admin-availability' | 'admin-catalog' | 'admin-specialized' | 'admin-gallery'
-  | 'admin-payments' | 'admin-stats' | 'admin-settings';
+  | 'admin-payments' | 'admin-stats' | 'admin-settings' | 'privacy';
 
 export type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed';
 export type PaymentStatus = 'pending' | 'partial' | 'paid' | 'cancelled';
@@ -19,7 +20,17 @@ export interface User {
   email: string;
   phone: string;
   role?: Exclude<Role, 'guest'>;
+  branchId?: BranchId;
   avatar?: string;
+  privacyConsent?: PrivacyConsent;
+  marketingConsent?: { accepted: boolean; acceptedAt?: string };
+}
+
+export interface PrivacyConsent {
+  accepted: boolean;
+  version: string;
+  acceptedAt: string;
+  source: 'registration' | 'google' | 'booking';
 }
 
 export interface Service {
@@ -32,6 +43,7 @@ export interface Service {
   category: string;
   active: boolean;
   featured?: boolean;
+  showPrice?: boolean;
 }
 
 export interface ServiceSubservice {
@@ -42,6 +54,7 @@ export interface ServiceSubservice {
   image: string;
   active: boolean;
   createdAt?: string;
+  showPrice?: boolean;
 }
 
 export interface BusinessSettings {
@@ -61,7 +74,37 @@ export interface BusinessSettings {
   reminderHours: string;
   maxDailyAppts: string;
   appointmentDuration: string;
+  publicHours?: PublicBusinessHours;
+  homepageHeroImage?: string;
+  homepageAboutImage?: string;
   secondaryBranch?: BranchBusinessSettings;
+  branchColors?: Record<BranchId, string>;
+  privacyResponsibleName?: string;
+  privacyAddress?: string;
+  privacyEmail?: string;
+  privacyPhone?: string;
+  privacyRetention?: string;
+  privacyPolicyText?: string;
+  privacyPolicyVersion?: string;
+  whatsappAutomations?: WhatsAppAutomationSettings;
+}
+
+export interface PublicBusinessHours {
+  weekdays: { open: string; close: string };
+  saturday: { open: string; close: string };
+  sunday: string;
+}
+
+export type WhatsAppAutomationKey =
+  | 'received'
+  | 'confirmed'
+  | 'reminder';
+
+export interface WhatsAppAutomationSettings {
+  enabled?: Partial<Record<WhatsAppAutomationKey, boolean>>;
+  templates?: Partial<Record<WhatsAppAutomationKey, string>>;
+  templateVersion?: number;
+  reminderHours?: number;
 }
 
 export interface BranchBusinessSettings {
@@ -91,7 +134,7 @@ export interface Appointment {
   services?: Service[];
   duration?: number;
   serviceType?: 'manicure' | 'pedicure';
-  subservices?: { id: string; name: string; pricePerNail: number; quantity: number }[];
+  subservices?: { id: string; name: string; pricePerNail: number; quantity: number; showPrice?: boolean }[];
   notes?: string;
   createdAt: string;
   paymentProof?: string;
@@ -99,6 +142,8 @@ export interface Appointment {
   workerUid?: string;
   ticketFolio?: string;
   branchId?: BranchId;
+  privacyConsent?: PrivacyConsent;
+  marketingConsent?: { accepted: boolean; acceptedAt?: string };
 }
 
 export interface BlockedDay {

@@ -3,6 +3,7 @@ import {
   type HtmlTagDescriptor,
   type Plugin,
   type PreviewServer,
+  type UserConfigFnPromise,
   type ViteDevServer,
 } from "vite"
 import react from "@vitejs/plugin-react"
@@ -13,7 +14,7 @@ import { pathToFileURL } from "node:url"
 import siteConfiguration from "./.figma/make/site.json"
 
 // Vite config — https://vitejs.dev/config/
-export default defineConfig(async ({ mode, command }) => {
+const viteConfig: UserConfigFnPromise = async ({ mode, command }) => {
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === "development"
   const plugins = [
@@ -60,11 +61,15 @@ export default defineConfig(async ({ mode, command }) => {
       port: parseInt(process.env.PORT || "8443"),
     },
   }
-})
+}
+
+export default defineConfig(viteConfig)
 
 type WhatsAppService = {
   authorizeAdmin(token: string): Promise<unknown>
   getStatus(): object
+  getNotificationHistory(): Promise<unknown[]>
+  sendManualReminder(appointmentId: string): Promise<void>
   start(): Promise<void>
 }
 
@@ -79,7 +84,73 @@ function whatsappServicePlugin(
     runtime.__lotoWhatsAppService ??= createWhatsAppService()
     const whatsapp = runtime.__lotoWhatsAppService
     server.middlewares.use((req, res, next) => {
-      if (req.url?.split("?")[0] !== "/api/whatsapp/status") return next()
+      const endpoint = req.url?.split("?")[0]
+      if (endpoint === "/api/whatsapp/reminder") {
+        if (req.method !== "POST") {
+          res.statusCode = 405
+          res.setHeader("Allow", "POST")
+          res.end()
+          return
+        }
+
+        const chunks: Buffer[] = []
+        let bodySize = 0
+        let bodyTooLarge = false
+        req.on("data", (chunk: Buffer) => {
+          if (bodyTooLarge) return
+          bodySize += chunk.length
+          if (bodySize > 4096) {
+            bodyTooLarge = true
+            return
+          }
+          chunks.push(chunk)
+        })
+        req.on("end", () => {
+          if (bodyTooLarge) {
+            res.statusCode = 413
+            res.setHeader("Content-Type", "application/json; charset=utf-8")
+            res.end(JSON.stringify({ message: "La solicitud es demasiado grande." }))
+            return
+          }
+          let appointmentId: unknown
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"))
+            appointmentId = body?.appointmentId
+          } catch {
+            res.statusCode = 400
+            res.setHeader("Content-Type", "application/json; charset=utf-8")
+            res.end(JSON.stringify({ message: "La solicitud no tiene un formato válido." }))
+            return
+          }
+          const authorization = req.headers.authorization
+          const token =
+            typeof authorization === "string" && authorization.startsWith("Bearer ")
+              ? authorization.slice(7)
+              : ""
+          res.setHeader("Cache-Control", "no-store")
+          void whatsapp!
+            .authorizeAdmin(token)
+            .then(() => whatsapp!.sendManualReminder(
+              typeof appointmentId === "string" ? appointmentId : "",
+            ))
+            .then(() => {
+              res.setHeader("Content-Type", "application/json; charset=utf-8")
+              res.end(JSON.stringify({ message: "Recordatorio enviado por WhatsApp." }))
+            })
+            .catch((error) => {
+              res.statusCode =
+                typeof error === "object" && error !== null && "statusCode" in error
+                  ? Number(error.statusCode)
+                  : 500
+              res.setHeader("Content-Type", "application/json; charset=utf-8")
+              res.end(JSON.stringify({
+                message: error instanceof Error ? error.message : "No se pudo enviar el recordatorio.",
+              }))
+            })
+        })
+        return
+      }
+      if (endpoint !== "/api/whatsapp/status" && endpoint !== "/api/whatsapp/history") return next()
       if (req.method !== "GET") {
         res.statusCode = 405
         res.setHeader("Allow", "GET")
@@ -97,7 +168,12 @@ function whatsappServicePlugin(
         .authorizeAdmin(token)
         .then(() => {
           res.setHeader("Content-Type", "application/json; charset=utf-8")
-          res.end(JSON.stringify(whatsapp!.getStatus()))
+          const result = endpoint === "/api/whatsapp/history"
+            ? whatsapp!.getNotificationHistory()
+            : whatsapp!.getStatus()
+          return Promise.resolve(result).then((data) => {
+            res.end(JSON.stringify(data))
+          })
         })
         .catch((error) => {
           res.statusCode =

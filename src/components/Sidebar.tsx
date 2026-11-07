@@ -11,6 +11,7 @@ interface NavItem { icon: React.ReactNode; label: string; page: Page; }
 const guestNav: NavItem[] = [
   { icon: <Home size={18} />, label: 'Inicio', page: 'home' },
   { icon: <BookOpen size={18} />, label: 'Catálogo', page: 'catalog' },
+  { icon: <ImageIcon size={18} />, label: 'Galería', page: 'gallery' },
   { icon: <Calendar size={18} />, label: 'Agendar cita', page: 'booking' },
   { icon: <LogIn size={18} />, label: 'Iniciar sesión', page: 'login' },
 ];
@@ -18,6 +19,7 @@ const guestNav: NavItem[] = [
 const clientNav: NavItem[] = [
   { icon: <Home size={18} />, label: 'Inicio', page: 'home' },
   { icon: <BookOpen size={18} />, label: 'Catálogo', page: 'catalog' },
+  { icon: <ImageIcon size={18} />, label: 'Galería', page: 'gallery' },
   { icon: <Calendar size={18} />, label: 'Agendar cita', page: 'booking' },
   { icon: <CalendarDays size={18} />, label: 'Mis citas', page: 'my-appointments' },
   { icon: <CreditCard size={18} />, label: 'Pagos', page: 'client-payments' },
@@ -25,6 +27,7 @@ const clientNav: NavItem[] = [
 ];
 
 const adminNav: NavItem[] = [
+  { icon: <Home size={18} />, label: 'Inicio', page: 'home' },
   { icon: <LayoutDashboard size={18} />, label: 'Panel', page: 'admin-dashboard' },
   { icon: <CalendarDays size={18} />, label: 'Citas', page: 'admin-appointments' },
   { icon: <Calendar size={18} />, label: 'Calendario', page: 'admin-calendar' },
@@ -43,6 +46,9 @@ const workerNav: NavItem[] = [
 
 function navByRole(role: Role): NavItem[] {
   if (role === 'admin') return adminNav;
+  if (role === 'branchAdmin') return adminNav.filter(item =>
+    ['home', 'admin-dashboard', 'admin-appointments', 'admin-calendar', 'admin-availability', 'admin-payments', 'admin-stats'].includes(item.page),
+  );
   if (role === 'client') return clientNav;
   if (role === 'worker') return workerNav;
   return guestNav;
@@ -81,7 +87,7 @@ export function Sidebar({ role, page, setPage, userName }: SidebarProps) {
                 Loto
               </div>
               <div className="text-[10px] text-[#BBA9AD] font-500 leading-tight">
-                {role === 'admin' ? 'Administrador' : role === 'client' ? 'Cliente' : role === 'worker' ? 'Trabajadora' : 'Invitado'}
+                {role === 'admin' ? 'Administrador' : role === 'branchAdmin' ? 'Administradora de sucursal' : role === 'client' ? 'Cliente' : role === 'worker' ? 'Trabajadora' : 'Invitado'}
               </div>
             </div>
           </div>

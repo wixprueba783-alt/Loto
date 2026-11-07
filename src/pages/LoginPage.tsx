@@ -5,15 +5,20 @@ import type { Page } from '../types';
 interface Props {
   setPage: (p: Page) => void;
   onLogin: (email: string, password: string) => Promise<void>;
+  onGoogle: () => Promise<void>;
+  onPasswordRecovery: (email: string) => Promise<void>;
 }
 
-export function LoginPage({ setPage, onLogin }: Props) {
+export function LoginPage({ setPage, onLogin, onGoogle, onPasswordRecovery }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [mode, setMode] = useState<'login' | 'recover'>('login');
   const [recoverSent, setRecoverSent] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [recoverEmail, setRecoverEmail] = useState('');
+  const [recoverError, setRecoverError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -23,9 +28,27 @@ export function LoginPage({ setPage, onLogin }: Props) {
     });
   }
 
-  function handleRecover(e: React.FormEvent) {
+  async function handleGoogle() {
+    setLoginError('');
+    setBusy(true);
+    try {
+      await onGoogle();
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'No se pudo continuar con Google.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRecover(e: React.FormEvent) {
     e.preventDefault();
-    setRecoverSent(true);
+    setRecoverError('');
+    try {
+      await onPasswordRecovery(recoverEmail);
+      setRecoverSent(true);
+    } catch (error) {
+      setRecoverError(error instanceof Error ? error.message : 'No se pudo enviar el enlace.');
+    }
   }
 
   return (
@@ -79,6 +102,10 @@ export function LoginPage({ setPage, onLogin }: Props) {
               <button className="w-full mb-5 rounded-xl border border-[#E8778A] bg-[#FFF1F3] px-4 py-2.5 text-sm font-600 text-[#C1536A] transition-colors hover:bg-[#FFE4E8]" onClick={() => setPage('home')}>
                 Continuar como invitada
               </button>
+              <button type="button" disabled={busy} className="w-full mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-sm font-600 text-[var(--color-text)] transition-colors hover:border-[var(--color-primary)] disabled:opacity-50" onClick={handleGoogle}>
+                <span className="mr-2 font-700 text-[var(--color-primary)]">G</span>
+                Continuar con Google
+              </button>
 
               <form onSubmit={handleLogin} className="space-y-3.5">
                 <div>
@@ -119,9 +146,6 @@ export function LoginPage({ setPage, onLogin }: Props) {
                   Regístrate
                 </button>
               </div>
-              <div className="mt-5 p-3 bg-[#FFF1F3] rounded-xl border border-[#FECDD5] text-xs text-[#6B5A5E]">
-                <p>Usa el correo y contraseña registrados en Firebase Authentication.</p>
-              </div>
             </>
           )}
 
@@ -134,12 +158,13 @@ export function LoginPage({ setPage, onLogin }: Props) {
                   <label className="block text-xs font-600 text-[#3D2A2F] mb-1.5">Correo electrónico</label>
                   <div className="relative">
                     <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#BBA9AD]" />
-                    <input className="input-field pl-9" type="email" placeholder="sofia@email.com" required />
+                    <input className="input-field pl-9" type="email" placeholder="sofia@email.com" value={recoverEmail} onChange={event => setRecoverEmail(event.target.value)} required />
                   </div>
                 </div>
                 <button type="submit" className="btn-primary w-full justify-center py-3">
                   Enviar enlace
                 </button>
+                {recoverError && <p className="text-xs text-red-500 text-center" role="alert">{recoverError}</p>}
                 <button type="button" className="btn-ghost w-full justify-center text-sm" onClick={() => setMode('login')}>
                   ← Volver al login
                 </button>

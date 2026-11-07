@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Clock, Calendar, Search, Star } from 'lucide-react';
-import { SERVICES, SERVICE_CATEGORIES } from '../data';
+import { BUSINESS_SETTINGS, SERVICES, SERVICE_CATEGORIES } from '../data';
 import type { Page, Service } from '../types';
 
 interface Props {
@@ -94,7 +94,11 @@ function ServiceCard({ service, onBook }: { service: Service; onBook: () => void
           </button>
         )}
         <div className="flex items-center justify-between mb-4 mt-auto pt-3 border-t border-[#F5EDE6]">
-          <span className="text-2xl font-700 text-[#C1536A]">${service.price}</span>
+          {(service.showPrice ?? true) ? (
+            <span className="text-2xl font-700 text-[#C1536A]">${service.price}</span>
+          ) : (
+            <span className="text-sm font-500 text-[#BBA9AD]">Precio a consultar</span>
+          )}
           <span className="flex items-center gap-1 text-xs text-[#6B5A5E] bg-[#F7F4F2] px-2.5 py-1 rounded-lg">
             <Clock size={12} /> {service.duration} min
           </span>

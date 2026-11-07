@@ -1,26 +1,7 @@
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { APPOINTMENTS, MONTHS } from '../../data';
+import { APPOINTMENTS, MONTHS, WEEKDAYS, getAppointmentPaymentSummary } from '../../data';
 import { CalendarDays, CheckCircle, XCircle, Clock, DollarSign, TrendingUp } from 'lucide-react';
 import type { BranchId } from '../../types';
-
-const weekData = [
-  { day: 'Lun', citas: 4, ingresos: 1480 },
-  { day: 'Mar', citas: 6, ingresos: 2200 },
-  { day: 'Mié', citas: 3, ingresos: 1050 },
-  { day: 'Jue', citas: 7, ingresos: 2630 },
-  { day: 'Vie', citas: 5, ingresos: 1900 },
-  { day: 'Sáb', citas: 8, ingresos: 3200 },
-  { day: 'Dom', citas: 0, ingresos: 0 },
-];
-
-const serviceData = [
-  { name: 'Gel semipermanente', value: 28 },
-  { name: 'Acrílicas', value: 22 },
-  { name: 'Manicura', value: 18 },
-  { name: 'Pedicura', value: 15 },
-  { name: 'Arte en uñas', value: 10 },
-  { name: 'Otros', value: 7 },
-];
 
 export function DashboardPage({ branchId }: { branchId: BranchId }) {
   const chartColors = branchId === 'north'
@@ -30,6 +11,30 @@ export function DashboardPage({ branchId }: { branchId: BranchId }) {
   const today = new Date();
   const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const todayLabel = `${today.getDate()} ${MONTHS[today.getMonth()].slice(0, 3)} ${today.getFullYear()}`;
+
+  // Citas de los últimos 7 días (incluye hoy) de esta sucursal.
+  const weekData = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (6 - index));
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const dayAppointments = branchAppointments.filter(appointment => appointment.date === dateKey);
+    return {
+      day: WEEKDAYS[date.getDay()],
+      citas: dayAppointments.length,
+      ingresos: dayAppointments.reduce((sum, appointment) => sum + getAppointmentPaymentSummary(appointment).paid, 0),
+    };
+  });
+
+  // Servicios más usados en esta sucursal (top 5).
+  const serviceCounts = new Map<string, number>();
+  branchAppointments.forEach(appointment => {
+    (appointment.services ?? [appointment.service]).forEach(service => {
+      serviceCounts.set(service.name, (serviceCounts.get(service.name) ?? 0) + 1);
+    });
+  });
+  const serviceData = Array.from(serviceCounts.entries())
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5)
+    .map(([name, value]) => ({ name, value }));
   const pending = branchAppointments.filter(a => a.status === 'pending').length;
   const confirmed = branchAppointments.filter(a => a.status === 'confirmed').length;
   const cancelled = branchAppointments.filter(a => a.status === 'cancelled').length;
@@ -106,39 +111,51 @@ export function DashboardPage({ branchId }: { branchId: BranchId }) {
       </div>
 
       {/* Today's appointments */}
-      <div className="card overflow-hidden">
-        <div className="p-5 border-b border-[#F5EDE6] flex items-center justify-between">
-          <h3 className="font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>Citas de hoy</h3>
-          <span className="text-xs text-[#BBA9AD] font-500">{todayLabel}</span>
+        <div className="card overflow-hidden">
+          <div className="p-5 border-b border-[#F5EDE6] flex items-center justify-between">
+            <h3 className="font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>Citas de hoy</h3>
+            <span className="text-xs text-[#BBA9AD] font-500">{todayLabel}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="text-xs text-[#BBA9AD] font-500">
+                  <th className="pb-3 font-500 text-center w-16">Hora</th>
+                    <th className="pb-3 font-500 text-center">Cliente</th>
+                    <th className="pb-3 font-500 text-center">Servicio</th>
+                    <th className="pb-3 font-500 text-center w-20">Total</th>
+                    <th className="pb-3 font-500 text-center w-32">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="">
+                {todayAppointments.map(appt => (
+                  <tr key={appt.id} className="transition-colors">
+                    <td className="p-3 text-center text-sm font-600 text-[#1A1012]">{appt.time}</td>
+                    <td className="p-3 text-center text-sm font-600 text-[#1A1012]">{appt.clientName}</td>
+                    <td className="p-3 text-center text-sm text-[#6B5A5E]">
+                      {(appt.services ?? [appt.service]).map(service => service.name).join(' + ')}
+                    </td>
+                    <td className="p-3 text-center text-sm font-600 text-[#C1536A]">${appt.total}</td>
+                    <td className="p-3 text-center">
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full font-600 border status-chip ${
+                        appt.status === 'confirmed' ? 'status-chip-success' :
+                        appt.status === 'completed' ? 'status-chip-success' :
+                        'status-chip-warning'
+                      }`}>
+                        {appt.status === 'confirmed' ? 'Confirmada' : appt.status === 'completed' ? 'Completada' : appt.status === 'cancelled' ? 'Cancelada' : 'Pendiente'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {todayAppointments.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-8 text-center text-[#BBA9AD] text-sm">No hay citas para hoy</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="divide-y divide-[#F5EDE6]">
-          {todayAppointments.map(appt => (
-            <div key={appt.id} className="p-3 flex items-center gap-4 table-row whitespace-nowrap overflow-x-auto">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#FFF1F3] flex items-center justify-center text-[#C1536A] text-sm font-700">
-                  {appt.time}
-                </div>
-                <div>
-                  <div className="text-sm font-600 text-[#1A1012]">{appt.clientName}</div>
-                  <div className="text-xs text-[#6B5A5E]">{(appt.services ?? [appt.service]).map(service => service.name).join(' + ')}</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 ml-auto">
-                <span className="text-sm font-600 text-[#C1536A]">${appt.total}</span>
-                <span className={`text-xs px-2.5 py-0.5 rounded-full font-600 border status-chip ${
-                  appt.status === 'confirmed' ? 'status-chip-success' :
-                  'status-chip-warning'
-                }`}>
-                  {appt.status === 'confirmed' ? 'Confirmada' : appt.status === 'completed' ? 'Completada' : appt.status === 'cancelled' ? 'Cancelada' : 'Pendiente'}
-                </span>
-              </div>
-            </div>
-          ))}
-          {todayAppointments.length === 0 && (
-            <div className="p-8 text-center text-[#BBA9AD] text-sm">No hay citas para hoy</div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

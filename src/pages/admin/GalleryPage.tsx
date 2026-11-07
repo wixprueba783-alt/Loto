@@ -1,18 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Check, Edit2, Upload, Trash2, GripVertical, X } from 'lucide-react';
-import { GALLERY_PHOTOS, SERVICES, addGalleryPhotoFS, deleteGalleryPhotoFS, updateGalleryPhotoFS, updateGalleryPhotoOrderFS } from '../../data';
+import { GALLERY_PHOTOS, addGalleryPhotoFS, deleteGalleryPhotoFS, updateGalleryPhotoFS, updateGalleryPhotoOrderFS } from '../../data';
 import type { GalleryPhoto } from '../../types';
 
 export function AdminGalleryPage() {
   const [photos, setPhotos] = useState<GalleryPhoto[]>(GALLERY_PHOTOS);
+  useEffect(() => { setPhotos([...GALLERY_PHOTOS].sort((a,b)=>a.order-b.order)); }, [GALLERY_PHOTOS.length]);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [newUrl, setNewUrl] = useState('');
-  const [newService, setNewService] = useState('');
   const [newAlt, setNewAlt] = useState('');
   const [imageError, setImageError] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingAlt, setEditingAlt] = useState('');
-  const [editingService, setEditingService] = useState('');
 
   function handleImageChange(file?: File) {
     if (!file) return;
@@ -20,34 +19,48 @@ export function AdminGalleryPage() {
       setImageError('Selecciona un archivo de imagen.');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setImageError('La imagen debe pesar menos de 5 MB.');
-      return;
-    }
-
+    const img = new Image();
     const reader = new FileReader();
     reader.onload = () => {
-      setNewUrl(String(reader.result));
-      setImageError('');
+      img.onload = () => {
+        const max = 800;
+        let { width, height } = img;
+        if (width > max || height > max) {
+          const scale = max / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, width, height);
+        const url = canvas.toDataURL('image/jpeg', 0.7);
+        setNewUrl(url);
+        setImageError('');
+      };
+      img.src = String(reader.result);
     };
     reader.readAsDataURL(file);
   }
 
-  function addPhoto() {
+async function addPhoto() {
     if (!newUrl) return;
     const photo: GalleryPhoto = {
       id: `g${Date.now()}`,
       url: newUrl,
-      serviceId: newService || undefined,
       alt: newAlt || 'Fotografía',
       order: photos.length + 1,
     };
-    setPhotos(prev => [...prev, photo]);
-    addGalleryPhotoFS(photo);
-    setNewUrl('');
-    setNewService('');
-    setNewAlt('');
-    setImageError('');
+    try {
+      await addGalleryPhotoFS(photo);
+      setNewUrl('');
+      setNewAlt('');
+      setImageError('');
+    } catch (err) {
+      setImageError('No se pudo guardar la foto en Firestore.');
+      console.error(err);
+    }
   }
 
   function deletePhoto(id: string) {
@@ -58,11 +71,10 @@ export function AdminGalleryPage() {
   function startEdit(photo: GalleryPhoto) {
     setEditingId(photo.id);
     setEditingAlt(photo.alt);
-    setEditingService(photo.serviceId || '');
   }
 
   async function saveEdit(photo: GalleryPhoto) {
-    const changes = { alt: editingAlt.trim() || 'Fotografía', serviceId: editingService || undefined };
+    const changes = { alt: editingAlt.trim() || 'Fotografía' };
     await updateGalleryPhotoFS(photo.id, changes);
     setPhotos(current => current.map(item => item.id === photo.id ? { ...item, ...changes } : item));
     setEditingId(null);
@@ -101,8 +113,7 @@ export function AdminGalleryPage() {
         <h3 className="font-700 text-[#1A1012] mb-4 flex items-center gap-2" style={{ fontFamily: 'var(--font-display)' }}>
           <Upload size={18} className="text-[#E8778A]" /> Agregar fotografía
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-          <div className="sm:col-span-2">
+        <div className="mb-3">
             <label className="block text-xs font-600 text-[#3D2A2F] mb-1.5">Fotografía</label>
             <label className="flex items-center gap-2 cursor-pointer border border-dashed border-[#EDD9CC] rounded-xl p-2.5 hover:bg-[#FDFAF9] transition-colors">
               <Upload size={15} className="text-[#E8778A]" />
@@ -117,14 +128,6 @@ export function AdminGalleryPage() {
             </label>
             {imageError && <p className="text-xs text-red-500 mt-1.5">{imageError}</p>}
           </div>
-          <div>
-            <label className="block text-xs font-600 text-[#3D2A2F] mb-1.5">Servicio asociado</label>
-            <select className="input-field text-sm" value={newService} onChange={e => setNewService(e.target.value)}>
-              <option value="">Sin asociar</option>
-              {SERVICES.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-        </div>
         <div className="flex gap-3">
           <input className="input-field text-sm flex-1" placeholder="Descripción / alt text"
             value={newAlt} onChange={e => setNewAlt(e.target.value)} />
@@ -155,7 +158,6 @@ export function AdminGalleryPage() {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {photos.map((photo, i) => {
-            const service = SERVICES.find(s => s.id === photo.serviceId);
             return (
               <div key={photo.id}
                 draggable
@@ -180,18 +182,9 @@ export function AdminGalleryPage() {
                 <div className="absolute top-1.5 left-1.5">
                   <GripVertical size={14} className="text-white/60" />
                 </div>
-                {service && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                    <p className="text-white text-[10px] font-600 truncate">{service.name}</p>
-                  </div>
-                )}
                 {editingId === photo.id && (
                   <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg bg-white p-2 shadow-lg" onClick={event => event.stopPropagation()}>
                     <input className="input-field text-xs mb-2" value={editingAlt} onChange={event => setEditingAlt(event.target.value)} placeholder="Descripción" />
-                    <select className="input-field text-xs mb-2" value={editingService} onChange={event => setEditingService(event.target.value)}>
-                      <option value="">Sin asociar</option>
-                      {SERVICES.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </select>
                     <div className="flex justify-end gap-1">
                       <button className="btn-ghost p-1.5" onClick={() => setEditingId(null)}><X size={14} /></button>
                       <button className="btn-primary p-1.5" onClick={() => saveEdit(photo)}><Check size={14} /></button>

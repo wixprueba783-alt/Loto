@@ -9,7 +9,7 @@ type ServiceForm = Omit<Service, 'id'> & { id?: string };
 const emptyForm: ServiceForm = {
   name: '', description: '', price: 0, duration: 60,
   image: 'https://images.unsplash.com/photo-1604654894610-df63bc536371?w=400&h=300&fit=crop&auto=format',
-  category: 'Manicura', active: true,
+  category: 'Manicura', active: true, showPrice: true,
 };
 
 export function AdminCatalogPage() {
@@ -127,6 +127,7 @@ export function AdminCatalogPage() {
         category: form.category,
         active: form.active,
         featured: form.featured,
+        showPrice: form.showPrice ?? true,
       };
       if (modal === 'create') {
       const newService = { ...savedForm, id: serviceId } as Service;
@@ -199,6 +200,7 @@ export function AdminCatalogPage() {
           <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Nuevo servicio</button>
         </div>
       </div>
+      {saveError && !modal && <p className="text-sm text-red-500" role="alert">{saveError}</p>}
 
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3">
@@ -247,6 +249,25 @@ export function AdminCatalogPage() {
                 </button>
                 <button className="btn-ghost p-1.5 text-[#BBA9AD] hover:text-red-400" onClick={() => confirmDelete(service.id)}>
                   <Trash2 size={15} />
+                </button>
+              </div>
+              <div className="mt-3 pt-3 border-t border-[#F5EDE6] flex items-center justify-between">
+                <span className="text-xs font-600 text-[#6B5A5E]">Mostrar precio</span>
+                <button
+                  type="button"
+                  className={`btn-ghost px-2 py-1 text-xs ${(service.showPrice ?? true) ? 'text-[#C1536A]' : 'text-[#BBA9AD]'}`}
+                  onClick={async () => {
+                    setSaveError('');
+                    const showPrice = !(service.showPrice ?? true);
+                    try {
+                      await updateServiceFS(service.id, { showPrice });
+                      setServices(current => current.map(item => item.id === service.id ? { ...item, showPrice } : item));
+                    } catch (error) {
+                      setSaveError(error instanceof Error ? error.message : 'No se pudo actualizar la visibilidad del precio.');
+                    }
+                  }}
+                >
+                  {(service.showPrice ?? true) ? 'Sí' : 'No'}
                 </button>
               </div>
               <div className="mt-3 pt-3 border-t border-[#F5EDE6] flex items-center justify-between">

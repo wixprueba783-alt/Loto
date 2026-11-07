@@ -21,6 +21,8 @@ services:
         value: /var/data/notified-appointments.json
       - key: BUSINESS_TIME_ZONE
         value: America/Mexico_City
+      - key: WHATSAPP_ALLOWED_ORIGINS
+        sync: false
       - key: VITE_FIREBASE_API_KEY
         sync: false
       - key: VITE_FIREBASE_AUTH_DOMAIN

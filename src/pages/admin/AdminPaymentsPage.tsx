@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { APPOINTMENTS, BUSINESS_SETTINGS, MONTHS, getAppointmentPaymentSummary, getWorkers, saveAppointmentPaymentProof, updateAppointmentPayment, updateAppointmentStatus } from '../../data';
+import { APPOINTMENTS, BRANCH_LABEL, BUSINESS_SETTINGS, MONTHS, getAppointmentPaymentSummary, getWorkers, saveAppointmentPaymentProof, updateAppointmentPayment, updateAppointmentStatus } from '../../data';
 import { PaymentBadge } from '../../components/StatusBadge';
 import { Modal } from '../../components/Modal';
 import { Check, Download, FileText, Printer, Search, X } from 'lucide-react';
-import { ticketToRawBtUrl, type PrintableTicket } from '../../ticket';
+import { TICKET_LOGO_URL, ticketToRawBtUrl, type PrintableTicket } from '../../ticket';
 import type { BranchId, PaymentStatus, User } from '../../types';
 
 const methodLabel: Record<string, string> = { cash: 'Efectivo', transfer: 'Transf.', card: 'Tarjeta' };
+
+const branchSlug: Record<BranchId, string> = { main: 'san-nicolas', north: 'escobedo' };
+const exportBranches: BranchId[] = ['main', 'north'];
 
 function getPaymentStatus(appt: typeof APPOINTMENTS[0]): PaymentStatus {
   return getAppointmentPaymentSummary(appt).status;
@@ -17,10 +20,11 @@ function formatDate(d: string) {
   return `${day} ${MONTHS[parseInt(m) - 1].slice(0, 3)} ${y}`;
 }
 
-function exportAppointments(appointments: typeof APPOINTMENTS) {
-  const headers = ['ID', 'Cliente', 'Correo', 'Teléfono', 'Servicio', 'Fecha cita', 'Hora', 'Estado cita', 'Total', 'Métodos de pago', 'Pagado', 'Comprobante', 'Creada'];
+function exportAppointments(appointments: typeof APPOINTMENTS, branchId: BranchId) {
+  const headers = ['ID', 'Sucursal', 'Cliente', 'Correo', 'Teléfono', 'Servicio', 'Fecha cita', 'Hora', 'Estado cita', 'Total', 'Métodos de pago', 'Pagado', 'Comprobante', 'Creada'];
   const rows = appointments.map(appt => [
     appt.id,
+    BRANCH_LABEL[(appt.branchId ?? 'main')],
     appt.clientName,
     appt.clientEmail,
     appt.clientPhone,
@@ -38,7 +42,7 @@ function exportAppointments(appointments: typeof APPOINTMENTS) {
   const csv = '\ufeff' + [headers, ...rows].map(row => row.map(escapeCell).join(',')).join('\r\n');
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  link.download = `historial-loto-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `historial-${branchSlug[branchId]}-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(link.href);
 }
@@ -50,14 +54,13 @@ export function AdminPaymentsPage({ branchId }: { branchId: BranchId }) {
   const [proofUploading, setProofUploading] = useState(false);
   const [proofError, setProofError] = useState('');
   const [workers, setWorkers] = useState<User[]>([]);
-  const [workersLoaded, setWorkersLoaded] = useState(false);
   const [ticketPrintError, setTicketPrintError] = useState('');
+  const [ticketToReprint, setTicketToReprint] = useState<PrintableTicket | null>(null);
 
   useEffect(() => {
     getWorkers()
       .then(setWorkers)
-      .catch(error => setTicketPrintError(error instanceof Error ? error.message : 'No se pudo cargar el equipo para reimprimir el ticket.'))
-      .finally(() => setWorkersLoaded(true));
+      .catch(error => setTicketPrintError(error instanceof Error ? error.message : 'No se pudo cargar el equipo para reimprimir el ticket.'));
   }, []);
 
   const branchAppointments = APPOINTMENTS.filter(appointment => (appointment.branchId ?? 'main') === branchId);
@@ -95,10 +98,81 @@ export function AdminPaymentsPage({ branchId }: { branchId: BranchId }) {
     };
 
     setTicketPrintError('');
-    try {
-      window.location.href = ticketToRawBtUrl(ticket);
-    } catch (error) {
-      setTicketPrintError(error instanceof Error ? error.message : 'No se pudo enviar el ticket a RawBT.');
+    setTicketToReprint(ticket);
+  }
+
+  function printTicketFromBrowser(ticket: PrintableTicket) {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setTicketPrintError('El navegador bloqueó la ventana de impresión. Permite las ventanas emergentes e inténtalo de nuevo.');
+      return;
+    }
+    printWindow.opener = null;
+
+    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[character] ?? character);
+    const rows = [
+      `<img class="ticket-logo" src="${TICKET_LOGO_URL}" alt="Logo Loto">`,
+      `<h1>${escapeHtml(ticket.businessName)}</h1>`,
+      `<p class="center">${escapeHtml(ticket.address)}</p>`,
+      '<hr><h2>RECIBO DE PAGO</h2>',
+      `<p><strong>Folio:</strong> ${escapeHtml(ticket.folio)}</p>`,
+      `<p>Fecha de cita: ${escapeHtml(formatDate(ticket.appointment.date))}</p>`,
+      `<p>Hora: ${escapeHtml(ticket.appointment.time)}</p><hr>`,
+      `<p>Cliente: ${escapeHtml(ticket.appointment.clientName)}</p>`,
+      `<p>Correo: ${escapeHtml(ticket.businessEmail)}</p>`,
+      `<p>Trabajadora: ${escapeHtml(ticket.workerName)}</p>`,
+      ...(ticket.appointment.services ?? [ticket.appointment.service]).map(service =>
+        `<p>${escapeHtml(service.name)}: $${service.price.toFixed(2)}</p>`),
+      ...(ticket.appointment.subservices ?? []).map(subservice =>
+        `<p>${escapeHtml(subservice.name)} x${subservice.quantity}: $${(subservice.pricePerNail * subservice.quantity).toFixed(2)}</p>`),
+      '<hr>',
+      `<p>Subtotal: $${(ticket.total / 1.16).toFixed(2)}</p>`,
+      `<p>IVA (16%): $${(ticket.total - ticket.total / 1.16).toFixed(2)}</p>`,
+      `<h2>Total: $${ticket.total.toFixed(2)}</h2>`,
+      ...ticket.payments.map(payment =>
+        `<p>Pago ${escapeHtml(methodLabel[payment.method])}: $${payment.amount.toFixed(2)}</p>`),
+      '<hr><p class="center">Gracias por tu preferencia</p>',
+    ];
+
+    printWindow.document.open();
+    printWindow.document.write(`<!doctype html>
+      <html lang="es"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(ticket.folio)}</title>
+      <style>
+        @page { size: 80mm auto; margin: 4mm; }
+        body { width: 72mm; margin: 0 auto; color: #000; font: 12px Arial, sans-serif; }
+        .ticket-logo { display: block; width: 34mm; height: 34mm; object-fit: contain; margin: 0 auto 3mm; }
+        h1, h2 { font-size: 15px; text-align: center; }
+        p { margin: 5px 0; overflow-wrap: anywhere; }
+        .center { text-align: center; }
+        hr { border: 0; border-top: 1px dashed #000; margin: 9px 0; }
+        @media screen { body { margin: 16px auto; } }
+      </style></head><body>${rows.join('')}</body></html>`);
+    printWindow.document.close();
+    const logo = printWindow.document.querySelector<HTMLImageElement>('.ticket-logo');
+    if (!logo) {
+      printWindow.close();
+      setTicketPrintError('No se pudo preparar el logo del ticket para imprimir.');
+      return;
+    }
+    const startPrint = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
+    const showLogoError = () => {
+      printWindow.close();
+      setTicketPrintError('No se pudo cargar el logo del ticket. Inténtalo de nuevo.');
+    };
+    logo.addEventListener('load', startPrint, { once: true });
+    logo.addEventListener('error', showLogoError, { once: true });
+    if (logo.complete) {
+      if (logo.naturalWidth > 0) startPrint();
+      else showLogoError();
     }
   }
 
@@ -146,9 +220,13 @@ export function AdminPaymentsPage({ branchId }: { branchId: BranchId }) {
               {b.label}
             </button>
           ))}
-          <button className="btn-secondary text-xs" onClick={() => exportAppointments(branchAppointments)} title="Descargar historial para Excel">
-            <Download size={14} /> Descargar Excel
-          </button>
+          {exportBranches.map(id => (
+            <button key={id} className="btn-secondary text-xs"
+              onClick={() => exportAppointments(APPOINTMENTS.filter(appointment => (appointment.branchId ?? 'main') === id), id)}
+              title={`Descargar historial de ${BRANCH_LABEL[id]} para Excel`}>
+              <Download size={14} /> Excel {BRANCH_LABEL[id]}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -196,10 +274,9 @@ export function AdminPaymentsPage({ branchId }: { branchId: BranchId }) {
                         {ps === 'paid' && (
                           <button
                             type="button"
-                            title="Reimprimir ticket con RawBT"
+                            title="Reimprimir ticket"
                             aria-label={`Reimprimir ticket de ${appt.clientName}`}
                             className="btn-ghost p-1.5 text-[#6B5A5E]"
-                            disabled={!workersLoaded}
                             onClick={() => reprintTicket(appt)}
                           >
                             <Printer size={14} />
@@ -217,6 +294,45 @@ export function AdminPaymentsPage({ branchId }: { branchId: BranchId }) {
           <div className="py-10 text-center text-[#BBA9AD] text-sm">No se encontraron registros</div>
         )}
       </div>
+
+      {/* Reprint ticket modal */}
+      {ticketToReprint && (
+        <Modal title="Reimprimir ticket" onClose={() => setTicketToReprint(null)} size="sm">
+          <div className="space-y-4">
+            <div className="rounded-xl bg-[#FFF1F3] p-4 text-sm">
+              <p className="font-700 text-[#C1536A]">{ticketToReprint.appointment.clientName}</p>
+              <p className="mt-1 text-xs text-[#6B5A5E]">
+                Folio {ticketToReprint.folio} · Total ${ticketToReprint.total.toFixed(2)}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-primary w-full justify-center"
+              onClick={() => printTicketFromBrowser(ticketToReprint)}
+            >
+              <Printer size={15} /> Imprimir o guardar como PDF
+            </button>
+            <button
+              type="button"
+              className="btn-secondary w-full justify-center"
+              onClick={async () => {
+                try {
+                  window.location.href = await ticketToRawBtUrl(ticketToReprint);
+                  setTicketPrintError('');
+                } catch (error) {
+                  setTicketPrintError(error instanceof Error ? error.message : 'No se pudo enviar el ticket a RawBT.');
+                }
+              }}
+            >
+              <Printer size={15} /> Enviar a RawBT (Android)
+            </button>
+            <p className="text-xs text-[#6B5A5E]">
+              RawBT requiere Android y la aplicación instalada. En otros dispositivos usa la impresión del navegador.
+            </p>
+            {ticketPrintError && <p className="text-xs text-red-600" role="alert">{ticketPrintError}</p>}
+          </div>
+        </Modal>
+      )}
 
       {/* Transfer proof modal */}
       {viewAppt && (

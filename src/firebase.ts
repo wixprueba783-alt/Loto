@@ -5,8 +5,12 @@ import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
   getAuth,
+  GoogleAuthProvider,
+  linkWithPopup,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   setPersistence,
+  signInWithPopup,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
@@ -89,6 +93,25 @@ export const authReady: Promise<void> = new Promise((resolve, reject) => {
 
 export async function loginWithFirebase(email: string, password: string) {
   return signInWithEmailAndPassword(auth, email, password);
+}
+
+export async function loginWithGoogle() {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  return signInWithPopup(auth, provider);
+}
+
+export async function linkGoogleToCurrentAccount() {
+  if (!auth.currentUser || auth.currentUser.isAnonymous) {
+    throw new Error('Inicia sesión con tu correo y contraseña antes de vincular Google.');
+  }
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  return linkWithPopup(auth.currentUser, provider);
+}
+
+export async function sendPasswordRecoveryEmail(email: string) {
+  return sendPasswordResetEmail(auth, email.trim());
 }
 
 export async function registerWithFirebase(name: string, email: string, password: string) {

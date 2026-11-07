@@ -3,12 +3,14 @@ import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { getCorsHeaders, parseAllowedOrigins } from "./cors.js"
 import { createWhatsAppService } from "./index.js"
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const distDirectory = path.resolve(directory, "../dist")
 const whatsapp = createWhatsAppService()
 const port = Number(process.env.PORT || 10000)
+const allowedOrigins = parseAllowedOrigins(process.env.WHATSAPP_ALLOWED_ORIGINS)
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -70,6 +72,27 @@ async function sendFile(response, filePath) {
   response.end(file)
 }
 
+async function readJsonBody(request) {
+  const chunks = []
+  let size = 0
+  for await (const chunk of request) {
+    size += chunk.length
+    if (size > 4096) {
+      const error = new Error("La solicitud es demasiado grande.")
+      error.statusCode = 413
+      throw error
+    }
+    chunks.push(chunk)
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"))
+  } catch {
+    const error = new Error("La solicitud no tiene un formato válido.")
+    error.statusCode = 400
+    throw error
+  }
+}
+
 const server = createServer(async (request, response) => {
   let pathname
 
@@ -85,6 +108,56 @@ const server = createServer(async (request, response) => {
   if (pathname === "/healthz") {
     sendJson(response, 200, { ok: true })
     return
+  }
+
+  const isWhatsAppEndpoint = [
+    "/api/whatsapp/status",
+    "/api/whatsapp/history",
+    "/api/whatsapp/reminder",
+  ].includes(pathname)
+  if (isWhatsAppEndpoint) {
+    const forwardedProto = request.headers["x-forwarded-proto"]
+    const protocol =
+      typeof forwardedProto === "string"
+        ? forwardedProto.split(",")[0].trim()
+        : "http"
+    const host = request.headers.host
+    const requestOrigin = host ? `${protocol}://${host}` : ""
+    const origin = request.headers.origin
+    const corsHeaders = getCorsHeaders(origin, requestOrigin, allowedOrigins)
+
+    if (!corsHeaders) {
+      sendJson(response, 403, { message: "Este origen no está autorizado." })
+      return
+    }
+    for (const [name, value] of Object.entries(corsHeaders)) {
+      response.setHeader(name, value)
+    }
+
+    if (request.method === "OPTIONS") {
+      const allowedMethod = pathname.endsWith("/reminder") ? "POST" : "GET"
+      const requestedMethod = request.headers["access-control-request-method"]
+      const requestedHeaders = (
+        request.headers["access-control-request-headers"] ?? ""
+      )
+        .split(",")
+        .map((header) => header.trim().toLowerCase())
+        .filter(Boolean)
+
+      if (
+        requestedMethod !== allowedMethod ||
+        requestedHeaders.some(
+          (header) => !["authorization", "content-type"].includes(header),
+        )
+      ) {
+        sendJson(response, 403, { message: "La solicitud previa no está autorizada." })
+        return
+      }
+
+      response.writeHead(204)
+      response.end()
+      return
+    }
   }
 
   if (pathname === "/api/whatsapp/status") {
@@ -113,6 +186,39 @@ const server = createServer(async (request, response) => {
           error instanceof Error
             ? error.message
             : "No se pudo consultar WhatsApp.",
+      })
+    }
+    return
+  }
+
+  if (pathname === "/api/whatsapp/reminder") {
+    if (request.method !== "POST") {
+      response.writeHead(405, { Allow: "POST" })
+      response.end()
+      return
+    }
+
+    const authorization = request.headers.authorization
+    const token =
+      typeof authorization === "string" && authorization.startsWith("Bearer ")
+        ? authorization.slice(7)
+        : ""
+
+    try {
+      const body = await readJsonBody(request)
+      await whatsapp.authorizeAdmin(token)
+      await whatsapp.sendManualReminder(body?.appointmentId)
+      sendJson(response, 200, { message: "Recordatorio enviado por WhatsApp." })
+    } catch (error) {
+      const statusCode =
+        typeof error === "object" && error !== null && "statusCode" in error
+          ? Number(error.statusCode)
+          : 500
+      sendJson(response, statusCode, {
+        message:
+          error instanceof Error
+            ? error.message
+            : "No se pudo enviar el recordatorio.",
       })
     }
     return

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, Calendar, Clock, Star, Phone, MapPin, ChevronRight, Sparkles, Camera, MessageCircle, ShieldCheck, Gem, Users } from 'lucide-react';
-import { BUSINESS_SETTINGS, GALLERY_PHOTOS, SERVICES, getNextAvailableDays } from '../data';
+import { BRANCH_LABEL, BUSINESS_SETTINGS, GALLERY_PHOTOS, SERVICES, getNextAvailableDays } from '../data';
 import type { BranchId, Page, Role } from '../types';
 
 interface Props {
@@ -11,16 +11,22 @@ interface Props {
   onSelectBranch: (branchId: BranchId) => void;
 };
 
-const SCHEDULE = [
-  { day: 'Lunes – Viernes', hours: '09:00–19:00' },
-  { day: 'Sábado', hours: '09:00–17:00' },
-  { day: 'Domingo', hours: 'Bajo disposición' },
-];
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+function getDailyGalleryRank(photoId: string, day: number) {
+  let hash = 2166136261;
+  const value = `${day}:${photoId}`;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
 
 export function HomePage({ setPage, role, setBookingService, branchId, onSelectBranch }: Props) {
   const isNorthBranch = branchId === 'north';
   const northSettings = BUSINESS_SETTINGS.secondaryBranch;
-  const branchName = isNorthBranch ? northSettings?.businessName || 'Sucursal Norte' : BUSINESS_SETTINGS.businessName;
+  const branchName = isNorthBranch ? northSettings?.businessName || BRANCH_LABEL.north : BUSINESS_SETTINGS.businessName;
   const branchTagline = isNorthBranch ? northSettings?.tagline || BUSINESS_SETTINGS.tagline : BUSINESS_SETTINGS.tagline;
   const branchPhone = isNorthBranch ? northSettings?.phone || BUSINESS_SETTINGS.phone : BUSINESS_SETTINGS.phone;
   const branchEmail = isNorthBranch ? northSettings?.email || BUSINESS_SETTINGS.email : BUSINESS_SETTINGS.email;
@@ -30,6 +36,12 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
   const branchWhatsapp = isNorthBranch ? northSettings?.whatsapp || BUSINESS_SETTINGS.whatsapp : BUSINESS_SETTINGS.whatsapp;
   const branchLatitude = isNorthBranch ? northSettings?.latitude : BUSINESS_SETTINGS.latitude;
   const branchLongitude = isNorthBranch ? northSettings?.longitude : BUSINESS_SETTINGS.longitude;
+  const publicHours = BUSINESS_SETTINGS.publicHours;
+  const schedule = [
+    { day: 'Lunes – Viernes', hours: `${publicHours?.weekdays.open ?? '09:00'}–${publicHours?.weekdays.close ?? '19:00'}` },
+    { day: 'Sábado', hours: `${publicHours?.saturday.open ?? '09:00'}–${publicHours?.saturday.close ?? '17:00'}` },
+    { day: 'Domingo', hours: publicHours?.sunday || 'Bajo disposición' },
+  ];
   const featured = SERVICES.filter(service => service.active && service.featured).slice(0, 6);
   const hasCoordinates = Boolean(branchLatitude && branchLongitude);
   const mapQuery = hasCoordinates
@@ -37,9 +49,20 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
     : branchAddress;
   const defaultDuration = SERVICES.find(service => service.active)?.duration || 60;
   const [nextSlots, setNextSlots] = useState(() => getNextAvailableDays(defaultDuration, 3, branchId));
+  const [galleryDay, setGalleryDay] = useState(() => Math.floor(Date.now() / DAY_IN_MS));
+  const dailyGalleryPhotos = [...GALLERY_PHOTOS]
+    .sort((first, second) => {
+      const rankDifference =
+        getDailyGalleryRank(first.id, galleryDay) - getDailyGalleryRank(second.id, galleryDay);
+      return rankDifference || (first.id < second.id ? -1 : first.id > second.id ? 1 : 0);
+    })
+    .slice(0, 4);
 
   useEffect(() => {
-    const refresh = () => setNextSlots(getNextAvailableDays(defaultDuration, 3, branchId));
+    const refresh = () => {
+      setNextSlots(getNextAvailableDays(defaultDuration, 3, branchId));
+      setGalleryDay(Math.floor(Date.now() / DAY_IN_MS));
+    };
     refresh();
     const timer = window.setInterval(refresh, 60_000);
     return () => window.clearInterval(timer);
@@ -49,7 +72,7 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
     <div className="space-y-0 bg-[#080708]">
       <section className="relative min-h-[560px] overflow-hidden bg-[#0D0B0C]">
         <img
-          src="https://images.unsplash.com/photo-1604654894610-df63bc536371?w=1600&h=1000&fit=crop&auto=format"
+          src={BUSINESS_SETTINGS.homepageHeroImage || "https://images.unsplash.com/photo-1604654894610-df63bc536371?w=1600&h=1000&fit=crop&auto=format"}
           alt="Manos con uñas cuidadas y diseño elegante"
           className="absolute inset-0 h-full w-full object-cover object-center"
         />
@@ -99,12 +122,12 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
                   {([
                     {
                       id: 'main' as const,
-                      title: BUSINESS_SETTINGS.businessName || 'Sucursal Principal',
+                      title: BUSINESS_SETTINGS.businessName || BRANCH_LABEL.main,
                       description: 'Experiencia Loto exclusiva y servicios premium',
                     },
                     {
                       id: 'north' as const,
-                      title: northSettings?.businessName || 'Sucursal Norte',
+                      title: northSettings?.businessName || BRANCH_LABEL.north,
                       description: 'Nuevas instalaciones y técnicas de vanguardia',
                     },
                   ]).map(branch => {
@@ -159,7 +182,7 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
             <p className="text-white/60 text-sm leading-7 max-w-md mt-6">Creamos una pausa hermosa en tu día: productos seleccionados, herramientas impecables y manos expertas para que cada visita se sienta especial.</p>
             <p className="text-[#D99A9F] text-2xl mt-6" style={{ fontFamily: 'var(--font-display)' }}>Date un gusto ♡</p>
           </div>
-          <img className="w-full h-[300px] lg:h-[370px] object-cover rounded-sm" src="https://images.unsplash.com/photo-1604654894610-df63bc536371?w=1200&h=700&fit=crop&auto=format" alt="Interior elegante del salón" />
+          <img className="w-full h-[300px] lg:h-[370px] object-cover rounded-sm" src={BUSINESS_SETTINGS.homepageAboutImage || "https://images.unsplash.com/photo-1604654894610-df63bc536371?w=1200&h=700&fit=crop&auto=format"} alt="Interior elegante del salón" />
         </div>
       </section>
 
@@ -187,7 +210,11 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
                   <h3 className="font-600 text-[#1A1012] text-sm mb-1">{service.name}</h3>
                   <p className="text-xs text-[#6B5A5E] mb-3 line-clamp-2 leading-relaxed">{service.description}</p>
                   <div className="flex items-center justify-between">
-                    <span className="font-700 text-[#C1536A] text-base">${service.price}</span>
+                    <span className="font-700 text-[#C1536A] text-base">
+                      {(service.showPrice ?? true)
+                        ? `$${service.price}`
+                        : 'Precio a consultar'}
+                    </span>
                     <span className="text-xs text-[#BBA9AD] flex items-center gap-1">
                       <Clock size={11} /> {service.duration} min
                     </span>
@@ -211,58 +238,60 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
       </section>
 
       {/* Next available slots */}
-      <section>
-        <h2 className="text-xl font-700 text-[#1A1012] mb-5" style={{ fontFamily: 'var(--font-display)' }}>
-          Próximos horarios disponibles
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {nextSlots.map(slot => (
-            <div key={slot.date} className="card p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  {slot.label && <div className="text-xs font-600 text-[#E8778A] uppercase tracking-wide mb-0.5">{slot.label}</div>}
-                  <div className="text-sm font-600 text-[#1A1012] capitalize">{slot.day}</div>
-                </div>
-                <Calendar size={16} className="text-[#BBA9AD]" />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {slot.times.map(t => (
-                  <button key={t} className="time-slot text-xs py-1.5 px-3"
-                    onClick={() => setPage('booking')}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-        {nextSlots.length === 0 && <div className="card p-6 text-sm text-[#6B5A5E]">No hay horarios disponibles próximamente.</div>}
-      </section>
-
-      {/* Gallery preview */}
-      <section>
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>
-            Galería
+      <section className="space-y-16 px-4">
+        <div className="max-w-7xl mx-auto">
+          <h2 className="text-xl font-700 text-[#1A1012] mb-5" style={{ fontFamily: 'var(--font-display)' }}>
+            Próximos horarios disponibles
           </h2>
-          {role === 'admin' && (
-            <button className="btn-ghost text-sm text-[#E8778A]" onClick={() => setPage('admin-gallery')}>
-              Administrar →
-            </button>
-          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {nextSlots.map(slot => (
+              <div key={slot.date} className="card p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    {slot.label && <div className="text-xs font-600 text-[#E8778A] uppercase tracking-wide mb-0.5">{slot.label}</div>}
+                    <div className="text-sm font-600 text-[#1A1012] capitalize">{slot.day}</div>
+                  </div>
+                  <Calendar size={16} className="text-[#BBA9AD]" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {slot.times.map(t => (
+                    <button key={t} className="time-slot text-xs py-1.5 px-3"
+                      onClick={() => setPage('booking')}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {nextSlots.length === 0 && <div className="card p-6 text-sm text-[#6B5A5E]">No hay horarios disponibles próximamente.</div>}
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-          {GALLERY_PHOTOS.map(photo => (
-            <div key={photo.id} className="aspect-square rounded-xl overflow-hidden bg-[#F5EDE6] group cursor-pointer">
-              <img src={photo.url} alt={photo.alt}
-                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
-            </div>
-          ))}
+
+        {/* Gallery preview */}
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-xl font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>
+              Galería
+            </h2>
+            {role === 'admin' && (
+              <button className="btn-ghost text-sm text-[#E8778A]" onClick={() => setPage('admin-gallery')}>
+                Administrar →
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {dailyGalleryPhotos.map(photo => (
+              <div key={photo.id} className="aspect-square rounded-xl overflow-hidden bg-[#F5EDE6] group cursor-pointer">
+                <img src={photo.url} alt={photo.alt}
+                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
       {/* Info: schedule + contact */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-7xl mx-auto px-4 py-10">
         <div className="card p-6">
           <div className="flex items-center gap-2 mb-5">
             <div className="w-9 h-9 rounded-xl bg-[#FFF1F3] flex items-center justify-center">
@@ -271,7 +300,7 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
             <h3 className="font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>Horarios de atención</h3>
           </div>
           <div className="space-y-3">
-            {SCHEDULE.map((s, i) => (
+            {schedule.map((s, i) => (
               <div key={i} className="flex justify-between items-center py-2 border-b border-[#F5EDE6] last:border-0">
                 <span className="text-sm font-500 text-[#3D2A2F]">{s.day}</span>
                 <span className={`text-sm font-600 ${s.hours === 'Cerrado' ? 'text-[#BBA9AD]' : 'text-[#C1536A]'}`}>
@@ -368,7 +397,14 @@ export function HomePage({ setPage, role, setBookingService, branchId, onSelectB
           </div>
           <div>
             <div className="text-[#D99A9F] text-xs tracking-[0.18em] uppercase mb-4">Horarios</div>
-            <div className="space-y-2 text-sm text-white/65">{SCHEDULE.map(schedule => <p key={schedule.day} className="flex justify-between gap-4"><span>{schedule.day}</span><span>{schedule.hours}</span></p>)}</div>
+            <div className="space-y-2 text-sm text-white/65">{schedule.map(item => <p key={item.day} className="flex justify-between gap-4"><span>{item.day}</span><span>{item.hours}</span></p>)}</div>
+            <button
+              type="button"
+              className="mt-4 text-left text-sm text-white/65 transition-colors hover:text-[var(--color-primary)]"
+              onClick={() => setPage('privacy')}
+            >
+              Política de privacidad
+            </button>
           </div>
         </div>
         <div className="max-w-[1400px] mx-auto border-t border-white/10 mt-10 pt-5 text-xs text-white/35 flex flex-wrap justify-between gap-3"><span>© {new Date().getFullYear()} {branchName}</span><span>Una experiencia creada con detalle.</span></div>

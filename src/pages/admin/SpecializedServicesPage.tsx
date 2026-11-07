@@ -12,6 +12,7 @@ const emptyDraft: Draft = {
   pricePerNail: 0,
   image: '',
   active: true,
+  showPrice: true,
 };
 
 function compressImage(file: File): Promise<string> {
@@ -87,7 +88,7 @@ export function SpecializedServicesPage() {
   function openEdit(item: ServiceSubservice) {
     setModalOpen(true);
     setEditId(item.id);
-    setDraft({ name: item.name, description: item.description ?? '', pricePerNail: item.pricePerNail, image: item.image, active: item.active });
+    setDraft({ name: item.name, description: item.description ?? '', pricePerNail: item.pricePerNail, image: item.image, active: item.active, showPrice: item.showPrice ?? true });
     setProcessingImage(false);
     setPreview(item.image);
     setError('');
@@ -156,6 +157,16 @@ export function SpecializedServicesPage() {
     }
   }
 
+  async function toggleShowPrice(item: ServiceSubservice) {
+    try {
+      const showPrice = !(item.showPrice ?? true);
+      await updateServiceSubservice(item.id, { showPrice });
+      setItems(current => current.map(entry => entry.id === item.id ? { ...entry, showPrice } : entry));
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : 'No se pudo actualizar la visibilidad del precio.');
+    }
+  }
+
   async function remove(id: string) {
     try {
       await deleteServiceSubservice(id);
@@ -176,7 +187,7 @@ export function SpecializedServicesPage() {
         <button className="btn-primary" onClick={openCreate}><Plus size={16} /> Nuevo especializado</button>
       </header>
 
-      {error && !editId && <p className="text-sm text-[var(--color-danger)]" role="alert">{error}</p>}
+      {error && !modalOpen && <p className="text-sm text-[var(--color-danger)]" role="alert">{error}</p>}
       {items.length === 0 ? (
         <div className="card p-8 text-center text-sm text-[var(--color-text-muted)]">Aún no hay servicios especializados.</div>
       ) : (
@@ -194,13 +205,25 @@ export function SpecializedServicesPage() {
                     {item.active ? 'Activo' : 'Inactivo'}
                   </span>
                 </div>
-                <p className="font-700 text-[var(--color-primary)]">${item.pricePerNail.toFixed(2)} por uña</p>
+                {(item.showPrice ?? true)
+                  ? <p className="font-700 text-[var(--color-primary)]">${item.pricePerNail.toFixed(2)} por uña</p>
+                  : <p className="text-xs text-[var(--color-text-muted)]">Precio oculto para clientes</p>}
                 <div className="flex gap-2">
                   <button className="btn-secondary flex-1 justify-center" onClick={() => openEdit(item)}><Edit2 size={14} /> Editar</button>
                   <button className="btn-ghost" aria-label={item.active ? 'Desactivar' : 'Activar'} onClick={() => void toggleActive(item)}>
                     {item.active ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                   <button className="btn-ghost text-[var(--color-danger)]" aria-label="Eliminar" onClick={() => setDeletingId(item.id)}><Trash2 size={16} /></button>
+                </div>
+                <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-3">
+                  <span className="text-xs font-600 text-[var(--color-text-muted)]">Mostrar precio</span>
+                  <button
+                    type="button"
+                    className={`btn-ghost px-2 py-1 text-xs ${(item.showPrice ?? true) ? 'text-[var(--color-primary)]' : 'text-[var(--color-text-muted)]'}`}
+                    onClick={() => void toggleShowPrice(item)}
+                  >
+                    {(item.showPrice ?? true) ? 'Sí' : 'No'}
+                  </button>
                 </div>
               </div>
             </article>

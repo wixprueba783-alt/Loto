@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, Clock, Filter } from 'lucide-react';
-import { APPOINTMENTS, MONTHS } from '../data';
+import { APPOINTMENTS, MONTHS, isAppointmentPriceVisible } from '../data';
 import { AppointmentBadge } from '../components/StatusBadge';
 import type { AppointmentStatus, User, BranchId } from '../types';
 
@@ -74,7 +74,7 @@ export function MyAppointmentsPage({ user, branchId, onReschedule }: Props) {
                     <span className="text-xs text-[#8D7A7D]">{appt.duration ?? appt.services?.reduce((sum, service) => sum + service.duration, 0) ?? appt.service.duration} min</span>
                   </div>
                   <div className="text-xs text-[#9B898B] mt-2">Método: {appt.payments.length > 0 ? appt.payments.map(p => methodLabel[p.method]).join(' + ') : 'Sin pago registrado'}</div>
-                  {(appt.subservices ?? []).length > 0 && (
+                  {isAppointmentPriceVisible(appt) && (appt.subservices ?? []).length > 0 && (
                     <div className="mt-2 space-y-1 border-t border-[var(--color-border)] pt-2">
                       {appt.subservices?.map(subservice => (
                         <div key={subservice.id} className="flex justify-between gap-3 text-xs text-[var(--color-text-muted)]">
@@ -88,8 +88,8 @@ export function MyAppointmentsPage({ user, branchId, onReschedule }: Props) {
               </div>
               <div className="md:border-l md:border-[#F0E5E0] md:pl-6 flex md:flex-col items-center md:items-end justify-between gap-3">
                 <div className="text-right">
-                  <div className="text-xs text-[#9B898B] uppercase tracking-wide">Total</div>
-                  <div className="text-2xl font-700 text-[#C1536A]">${appt.total}</div>
+                  <div className="text-xs text-[#9B898B] uppercase tracking-wide">{isAppointmentPriceVisible(appt) ? 'Total' : 'Precio'}</div>
+                  <div className="text-2xl font-700 text-[#C1536A]">{isAppointmentPriceVisible(appt) ? `$${appt.total}` : 'A consultar'}</div>
                 </div>
                 <AppointmentBadge status={appt.status} />
               </div>

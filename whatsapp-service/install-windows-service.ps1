@@ -6,6 +6,8 @@ $environmentFile = Join-Path $serviceDirectory ".env"
 $exampleEnvironmentFile = Join-Path $serviceDirectory ".env.example"
 $webEnvironmentFile = Join-Path $projectDirectory ".env"
 $taskName = "Loto WhatsApp Notifications"
+$recoveryTaskName = "Loto WhatsApp Resume Recovery"
+$recoveryScript = Join-Path $serviceDirectory "recover-windows-service.ps1"
 $credentialFile = Join-Path $serviceDirectory "service-account.json"
 $webFirebaseKeys = @(
   "VITE_FIREBASE_API_KEY",
@@ -149,6 +151,32 @@ try {
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries
 
+  $unlockTriggerClass = Get-CimClass `
+    -Namespace "Root/Microsoft/Windows/TaskScheduler" `
+    -ClassName "MSFT_TaskSessionStateChangeTrigger"
+  $unlockTrigger = New-CimInstance `
+    -CimClass $unlockTriggerClass `
+    -ClientOnly `
+    -Property @{
+      Enabled = $true
+      StateChange = [uint32]8
+      UserId = "$env:USERDOMAIN\$env:USERNAME"
+    }
+  $recoveryLogonTrigger = New-ScheduledTaskTrigger `
+    -AtLogOn `
+    -User $env:USERNAME
+  $recoveryAction = New-ScheduledTaskAction `
+    -Execute (Join-Path $PSHOME "powershell.exe") `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$recoveryScript`""
+  $recoverySettings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -RestartCount 5 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 2) `
+    -MultipleInstances IgnoreNew `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries
+
   Register-ScheduledTask `
     -TaskName $taskName `
     -Action $action `
@@ -157,9 +185,17 @@ try {
     -Description "Inicia Loto y el servicio de notificaciones WhatsApp al iniciar sesión." `
     -Force | Out-Null
 
+  Register-ScheduledTask `
+    -TaskName $recoveryTaskName `
+    -Action $recoveryAction `
+    -Trigger @($recoveryLogonTrigger, $unlockTrigger) `
+    -Settings $recoverySettings `
+    -Description "Reinicia las notificaciones de WhatsApp al iniciar sesión o desbloquear Windows." `
+    -Force | Out-Null
+
   Start-ScheduledTask -TaskName $taskName
   Write-Host ""
-  Write-Host "Instalación completa. El servicio se inició y arrancará al iniciar sesión en Windows."
+  Write-Host "Instalación completa. El servicio se inició y se recuperará al iniciar sesión o desbloquear Windows."
   Write-Host "Log: whatsapp-service\logs\service.log"
   Write-Host "Para abrir Loto en esta computadora: http://localhost:10000"
 }

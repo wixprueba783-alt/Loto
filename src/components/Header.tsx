@@ -6,6 +6,7 @@ import type { Role, Page } from '../types';
 const pageTitles: Partial<Record<Page, string>> = {
   home: 'Inicio',
   catalog: 'Catálogo de Servicios',
+  gallery: 'Galería',
   booking: 'Agendar Cita',
   'my-appointments': 'Mis Citas',
   'client-payments': 'Mis Pagos',
@@ -36,7 +37,7 @@ export function Header({ page, role, userName, onLogout }: HeaderProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const visibleAppointments = role === 'worker'
     ? APPOINTMENTS.filter(appointment => appointment.status !== 'cancelled')
-    : role === 'admin'
+    : role === 'admin' || role === 'branchAdmin'
       ? APPOINTMENTS.filter(appointment => appointment.status === 'pending')
       : APPOINTMENTS.filter(appointment => appointment.status === 'pending');
   const pendingCount = visibleAppointments.length;
@@ -52,14 +53,14 @@ export function Header({ page, role, userName, onLogout }: HeaderProps) {
       <div className="flex items-center gap-3">
         <div className="w-10 md:hidden" />
         <div>
-          <h1 className="text-base font-600 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>
+          <h1 className="text-2xl font-700 text-[#1A1012]" style={{ fontFamily: 'var(--font-display)' }}>
             {pageTitles[page] || 'Loto'}
           </h1>
         </div>
       </div>
 
       <div className="flex items-center gap-2 relative">
-        {(role === 'client' || role === 'admin' || role === 'worker') && (
+        {(role === 'client' || role === 'admin' || role === 'branchAdmin' || role === 'worker') && (
           <>
             <div className="relative">
               <button className="btn-ghost p-2 relative" onClick={() => setNotificationsOpen(v => !v)} aria-label="Notificaciones">

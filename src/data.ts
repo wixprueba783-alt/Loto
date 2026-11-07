@@ -1,4 +1,4 @@
-import { auth, db, authReady, firebaseConfigured, storage } from "./firebase"
+import { auth, db, authReady, firebaseConfigured } from "./firebase"
 import {
   collection,
   getDoc,
@@ -15,12 +15,6 @@ import {
   serverTimestamp,
 } from "firebase/firestore"
 import type { DocumentData } from "firebase/firestore"
-import {
-  deleteObject,
-  getDownloadURL,
-  ref,
-  uploadBytes,
-} from "firebase/storage"
 import type {
   Service,
   ServiceSubservice,
@@ -31,8 +25,35 @@ import type {
   BusinessSettings,
   BranchId,
   PaymentStatus,
+  WhatsAppAutomationSettings,
 } from "./types"
 import type { Role, User } from "./types"
+
+/* Nombres visibles de cada sucursal. El tema rosa corresponde a "main"
+   (San Nicolás) y el tema oliva a "north" (Escobedo). */
+export const BRANCH_LABEL: Record<BranchId, string> = {
+  main: "San Nicolás",
+  north: "Escobedo",
+}
+export const PRIVACY_POLICY_VERSION = "2026-11-07-v1"
+export const DEFAULT_WHATSAPP_AUTOMATIONS: WhatsAppAutomationSettings = {
+  templateVersion: 2,
+  enabled: {
+    received: true,
+    confirmed: true,
+    reminder: true,
+  },
+  templates: {
+    received: "💅✨ ¡Hola {firstName}! Recibimos tu solicitud de cita. 💗\n\nTe esperamos en la fecha y hora seleccionadas. Agradecemos mucho tu preferencia y confianza. Te avisaremos cuando quede confirmada. ✨",
+    confirmed: "💅✨ ¡Hola {firstName}! Tu cita ha sido *confirmada*. 🩷\n\nTe esperamos en la fecha y hora seleccionadas:\n📅 Fecha: {date}\n🕐 Hora: {time}\n\nAgradecemos mucho tu preferencia y confianza. ¡Nos vemos pronto! ✨",
+    reminder: "💅✨ ¡Hola {firstName}! Te recordamos que tienes una cita próximamente.\n\n📅 Fecha: {date}\n🕐 Hora: {time}\n\nPor favor, confírmanos tu asistencia respondiendo a este mensaje con un “Sí, asistiré”. 💖\n\n¡Te esperamos! Gracias por tu preferencia. ✨",
+  },
+  reminderHours: 24,
+}
+
+export function currentPrivacyPolicyVersion() {
+  return BUSINESS_SETTINGS.privacyPolicyVersion || PRIVACY_POLICY_VERSION
+}
 
 /* ============================================================
    Datos que vienen de Firestore.
@@ -84,8 +105,20 @@ export let BUSINESS_SETTINGS: BusinessSettings = {
   reminderHours: "24",
   maxDailyAppts: "10",
   appointmentDuration: "60",
+  publicHours: {
+    weekdays: { open: "09:00", close: "19:00" },
+    saturday: { open: "09:00", close: "17:00" },
+    sunday: "Bajo disposición",
+  },
+  homepageHeroImage:
+    "https://images.unsplash.com/photo-1604654894610-df63bc536371?w=1600&h=1000&fit=crop&auto=format",
+  homepageAboutImage:
+    "https://images.unsplash.com/photo-1604654894610-df63bc536371?w=1200&h=700&fit=crop&auto=format",
+  branchColors: { main: "#D99A9F", north: "#BBC58E" },
+  privacyPolicyVersion: PRIVACY_POLICY_VERSION,
+  privacyRetention: "",
   secondaryBranch: {
-    businessName: "Loto Sucursal Norte",
+    businessName: "Loto Escobedo",
     tagline: "Tu belleza, nuestra pasión",
     phone: "555-100-2000",
     email: "admin@nailstudio.mx",
@@ -128,6 +161,14 @@ function documentBranchId(id: string, data: { branchId?: BranchId }): BranchId {
   return data.branchId ?? (id.startsWith("north_") ? "north" : "main")
 }
 
+function appointmentFromDocument(id: string, data: DocumentData): Appointment {
+  return {
+    ...data,
+    id,
+    branchId: documentBranchId(id, data as { branchId?: BranchId }),
+  } as Appointment
+}
+
 export let dataReady = false
 
 export async function getUserProfile(uid: string): Promise<User | null> {
@@ -156,9 +197,19 @@ export async function deleteManagedUser(uid: string) {
   await deleteDoc(doc(db, "users", uid))
 }
 
-export async function getWorkers() {
+export async function getWorkers(branchId?: BranchId) {
+  const profile = auth.currentUser?.uid
+    ? await getUserProfile(auth.currentUser.uid)
+    : null
+  const workersQuery = profile?.role === "branchAdmin"
+    ? query(
+        collection(db, "users"),
+        where("role", "==", "worker"),
+        where("branchId", "==", profile.branchId ?? branchId ?? "main"),
+      )
+    : query(collection(db, "users"), where("role", "==", "worker"))
   const snapshot = await getDocs(
-    query(collection(db, "users"), where("role", "==", "worker")),
+    workersQuery,
   )
   return snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }) as User)
 }
@@ -177,28 +228,48 @@ export async function getUsers() {
 }
 
 export function subscribeAdminAppointments(onChange: () => void) {
-  return onSnapshot(
-    collection(db, "appointments"),
-    (snapshot) => {
-      APPOINTMENTS = snapshot.docs.map(
-        (item) =>
-          ({ id: item.id, branchId: "main", ...item.data() }) as Appointment,
-      )
-      onChange()
-    },
-    (error) =>
-      console.error(
-        "No se pudieron leer las citas para el administrador:",
-        error,
-      ),
-  )
+  let unsubscribe: (() => void) | undefined
+  let cancelled = false
+  const uid = auth.currentUser?.uid
+  if (!uid) return () => {}
+  void getUserProfile(uid).then((profile) => {
+    if (cancelled) return
+    const appointmentQuery = profile?.role === "branchAdmin"
+      ? query(
+          collection(db, "appointments"),
+          where("branchId", "==", profile.branchId ?? "main"),
+        )
+      : collection(db, "appointments")
+    unsubscribe = onSnapshot(
+      appointmentQuery,
+      (snapshot) => {
+        APPOINTMENTS = snapshot.docs.map((item) =>
+          appointmentFromDocument(item.id, item.data()),
+        )
+        onChange()
+      },
+      (error) => console.error("No se pudieron leer las citas para el administrador:", error),
+    )
+  }).catch((error) => console.error("No se pudo validar el alcance de las citas:", error))
+  return () => {
+    cancelled = true
+    unsubscribe?.()
+  }
 }
 
-export async function loadAdminAppointments() {
-  const snapshot = await getDocs(collection(db, "appointments"))
-  APPOINTMENTS = snapshot.docs.map(
-    (item) =>
-      ({ id: item.id, branchId: "main", ...item.data() }) as Appointment,
+export async function loadAdminAppointments(branchId?: BranchId) {
+  const uid = auth.currentUser?.uid
+  if (!uid) throw new Error("Se requiere una sesión para cargar las citas.")
+  const profile = await getUserProfile(uid)
+  const appointmentQuery = profile?.role === "branchAdmin"
+    ? query(
+        collection(db, "appointments"),
+        where("branchId", "==", profile.branchId ?? branchId ?? "main"),
+      )
+    : collection(db, "appointments")
+  const snapshot = await getDocs(appointmentQuery)
+  APPOINTMENTS = snapshot.docs.map((item) =>
+    appointmentFromDocument(item.id, item.data()),
   )
   return APPOINTMENTS
 }
@@ -248,6 +319,14 @@ export function getAppointmentPaymentSummary(
   return { status, paid, due, payments }
 }
 
+export function isAppointmentPriceVisible(appointment: Appointment): boolean {
+  return (appointment.services ?? [appointment.service]).every(
+    (service) => service.showPrice ?? true,
+  ) && (appointment.subservices ?? []).every(
+    (subservice) => subservice.showPrice ?? true,
+  )
+}
+
 function appointmentDuration(appointment: Appointment) {
   return Math.max(
     1,
@@ -262,7 +341,7 @@ function appointmentDuration(appointment: Appointment) {
 
 function applySnapshotData(
   collectionName: string,
-  docs: { id: string data: () => DocumentData }[],
+  docs: { id: string; data: () => DocumentData }[],
 ) {
   if (collectionName === "services")
     SERVICES = docs.map((d) => ({ id: d.id, ...d.data() }) as Service)
@@ -271,8 +350,8 @@ function applySnapshotData(
       (d) => ({ id: d.id, ...d.data() }) as ServiceSubservice,
     )
   if (collectionName === "appointments")
-    APPOINTMENTS = docs.map(
-      (d) => ({ id: d.id, branchId: "main", ...d.data() }) as Appointment,
+    APPOINTMENTS = docs.map((d) =>
+      appointmentFromDocument(d.id, d.data()),
     )
   if (collectionName === "galleryPhotos")
     GALLERY_PHOTOS = docs.map(
@@ -313,15 +392,26 @@ export async function subscribeFirestoreData(
     auth.currentUser &&
     (profile?.role === "admin"
       ? collection(db, "appointments")
-      : query(
-          collection(db, "appointments"),
-          where(
-            profile?.role === "worker" ? "workerUid" : "ownerUid",
-            "==",
-            auth.currentUser.uid,
-          ),
-        ))
+      : profile?.role === "branchAdmin"
+        ? query(
+            collection(db, "appointments"),
+            where("branchId", "==", profile.branchId ?? "main"),
+          )
+        : query(
+            collection(db, "appointments"),
+            where(
+              profile?.role === "worker" ? "workerUid" : "ownerUid",
+              "==",
+              auth.currentUser.uid,
+            ),
+          ))
 
+  const branchScopedCollections = new Set([
+    "blockedDays",
+    "blockedTimes",
+    "availability",
+    "busySlots",
+  ])
   const unsubscribers = [
     "services",
     "serviceSubservices",
@@ -330,9 +420,16 @@ export async function subscribeFirestoreData(
     "blockedTimes",
     "availability",
     "busySlots",
-  ].map((collectionName) =>
-    onSnapshot(
-      collection(db, collectionName),
+  ].map((collectionName) => {
+    const source = profile?.role === "branchAdmin" &&
+        branchScopedCollections.has(collectionName)
+      ? query(
+          collection(db, collectionName),
+          where("branchId", "==", profile.branchId ?? "main"),
+        )
+      : collection(db, collectionName)
+    return onSnapshot(
+      source,
       (snapshot) => {
         applySnapshotData(collectionName, snapshot.docs)
         onChange()
@@ -350,8 +447,8 @@ export async function subscribeFirestoreData(
           error,
         )
       },
-    ),
-  )
+    )
+  })
   if (appointmentSource) {
     unsubscribers.push(
       onSnapshot(appointmentSource, (snapshot) => {
@@ -472,6 +569,11 @@ export async function initFirestoreData() {
     auth.currentUser &&
     (profile?.role === "admin"
       ? collection(db, "appointments")
+      : profile?.role === "branchAdmin"
+        ? query(
+            collection(db, "appointments"),
+            where("branchId", "==", profile.branchId ?? "main"),
+          )
       : query(
           collection(db, "appointments"),
           where(
@@ -481,6 +583,14 @@ export async function initFirestoreData() {
           ),
         ))
 
+  const scopedCollection = (name: string) =>
+    profile?.role === "branchAdmin" &&
+        ["blockedDays", "blockedTimes", "availability", "busySlots"].includes(name)
+      ? query(
+          collection(db, name),
+          where("branchId", "==", profile.branchId ?? "main"),
+        )
+      : collection(db, name)
   const reads = Promise.all([
     getDocs(collection(db, "services")),
     getDocs(collection(db, "serviceSubservices")).catch((error) => {
@@ -504,10 +614,10 @@ export async function initFirestoreData() {
       ? getDocs(appointmentSource)
       : Promise.resolve({ docs: [] } as never),
     getDocs(collection(db, "galleryPhotos")),
-    getDocs(collection(db, "blockedDays")),
-    getDocs(collection(db, "blockedTimes")),
-    getDocs(collection(db, "availability")),
-    getDocs(collection(db, "busySlots")).catch((error) => {
+    getDocs(scopedCollection("blockedDays")),
+    getDocs(scopedCollection("blockedTimes")),
+    getDocs(scopedCollection("availability")),
+    getDocs(scopedCollection("busySlots")).catch((error) => {
       console.warn(
         "No se pudieron leer los bloqueos de horario; verifica firestore.rules:",
         error,
@@ -540,8 +650,8 @@ export async function initFirestoreData() {
   SERVICE_SUBSERVICES = serviceSubservicesSnap.docs.map(
     (d) => ({ id: d.id, ...d.data() }) as ServiceSubservice,
   )
-  APPOINTMENTS = apptsSnap.docs.map(
-    (d) => ({ id: d.id, branchId: "main", ...d.data() }) as Appointment,
+  APPOINTMENTS = apptsSnap.docs.map((d) =>
+    appointmentFromDocument(d.id, d.data()),
   )
   GALLERY_PHOTOS = gallerySnap.docs.map(
     (d) => ({ id: d.id, ...d.data() }) as GalleryPhoto,
@@ -833,20 +943,6 @@ export async function updateAppointmentStatus(
   }
 }
 
-export async function requestAppointmentReminder(id: string) {
-  try {
-    await updateDoc(doc(db, "appointments", id), {
-      manualReminderRequest: {
-        id: doc(collection(db, "appointments")).id,
-        requestedAt: serverTimestamp(),
-      },
-    })
-  } catch (err) {
-    console.error("No se pudo solicitar el recordatorio por WhatsApp:", err)
-    throw err
-  }
-}
-
 export async function updateAppointmentWorker(
   id: string,
   workerUid: string | null,
@@ -864,7 +960,10 @@ export async function updateAppointmentWorker(
 
 export async function updateAppointmentPayment(
   id: string,
-  payment: { method: Appointment["payments"][number]["method"] amount: number },
+  payment: {
+    method: Appointment["payments"][number]["method"]
+    amount: number
+  },
   status: Appointment["status"] = "completed",
   notes?: string,
   total?: number,
@@ -897,42 +996,40 @@ export async function saveAppointmentPaymentProof(
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
     throw new Error("Selecciona una foto en formato JPG, PNG o WEBP.")
   }
-  if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
-    throw new Error("La imagen debe pesar menos de 5 MB.")
-  }
-  if (!firebaseConfigured) {
-    throw new Error("Firebase no está configurado para guardar el comprobante.")
+  if (file.size <= 0) {
+    throw new Error("La imagen debe pesar más de 0 bytes.")
   }
 
-  const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_")
-  const proofRef = ref(
-    storage,
-    `paymentProofs/${id}/${Date.now()}_${safeFileName}`,
-  )
-  let uploaded = false
-  try {
-    await uploadBytes(proofRef, file, { contentType: file.type })
-    uploaded = true
-    const downloadUrl = await getDownloadURL(proofRef)
-    await updateDoc(doc(db, "appointments", id), { paymentProof: downloadUrl })
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const max = 1000;
+        let { width, height } = img;
+        if (width > max || height > max) {
+          const scale = max / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+      img.src = String(reader.result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
-    const appointment = APPOINTMENTS.find((item) => item.id === id)
-    if (appointment) appointment.paymentProof = downloadUrl
-    return downloadUrl
-  } catch (error) {
-    if (uploaded) {
-      try {
-        await deleteObject(proofRef)
-      } catch (cleanupError) {
-        console.error(
-          "No se pudo eliminar el comprobante que no quedó vinculado:",
-          cleanupError,
-        )
-      }
-    }
-    console.error("No se pudo guardar el comprobante de transferencia:", error)
-    throw error
-  }
+  await updateDoc(doc(db, "appointments", id), { paymentProof: dataUrl })
+  const appointment = APPOINTMENTS.find((item) => item.id === id)
+  if (appointment) appointment.paymentProof = dataUrl
+  return dataUrl
 }
 
 export async function addServiceSubservice(subservice: ServiceSubservice) {
@@ -989,6 +1086,7 @@ export async function finalizeAppointmentPaymentWithTicketFolio(
   payments: Appointment["payments"],
   notes: string,
   total: number,
+  branchId: BranchId = "main",
 ): Promise<string> {
   const paymentMethods = new Set(payments.map((payment) => payment.method))
   const paymentSumInCents = payments.reduce(
@@ -1011,8 +1109,22 @@ export async function finalizeAppointmentPaymentWithTicketFolio(
   }
 
   const appointmentRef = doc(db, "appointments", id)
-  const sequenceRef = doc(db, "settings", "ticketSequence")
-  const appointmentsSnapshot = await getDocs(collection(db, "appointments"))
+  const sequenceRef = doc(
+    db,
+    "settings",
+    branchId === "main" ? "ticketSequence" : `ticketSequence_${branchId}`,
+  )
+  const appointmentsQuery = auth.currentUser
+    ? await getUserProfile(auth.currentUser.uid).then((profile) =>
+        profile?.role === "branchAdmin"
+          ? query(
+              collection(db, "appointments"),
+              where("branchId", "==", branchId),
+            )
+          : collection(db, "appointments"),
+      )
+    : collection(db, "appointments")
+  const appointmentsSnapshot = await getDocs(appointmentsQuery)
   const highestExistingTicketNumber = appointmentsSnapshot.docs.reduce(
     (maxNumber, document) => {
       const appointmentData = document.data() as Partial<Appointment>
@@ -1142,6 +1254,86 @@ export async function saveBusinessSettings(settings: BusinessSettings) {
   ]
 }
 
+export async function prepareHomepageImage(file: File): Promise<string> {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    throw new Error("Selecciona una imagen JPG, PNG o WEBP.")
+  }
+  if (file.size <= 0 || file.size > 10 * 1024 * 1024) {
+    throw new Error("La imagen debe pesar más de 0 bytes y máximo 10 MB.")
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const image = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    let settled = false
+    const finish = (error?: Error, dataUrl?: string) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      URL.revokeObjectURL(objectUrl)
+      if (error) reject(error)
+      else if (dataUrl) resolve(dataUrl)
+      else reject(new Error("No se pudo preparar la fotografía."))
+    }
+    const timeout = window.setTimeout(() => {
+      finish(new Error("No se pudo preparar la fotografía a tiempo. Prueba con otra imagen."))
+    }, 30_000)
+    image.onload = () => {
+      void (async () => {
+      try {
+        const canvas = document.createElement("canvas")
+        const context = canvas.getContext("2d")
+        if (!context) {
+          finish(new Error("El navegador no pudo preparar la imagen."))
+          return
+        }
+
+        let width = image.naturalWidth
+        let height = image.naturalHeight
+        const maxImageBytes = 230 * 1024
+        for (let resize = 0; resize < 5; resize += 1) {
+          const scale = Math.min(1, 1600 / Math.max(width, height))
+          canvas.width = Math.max(1, Math.round(width * scale))
+          canvas.height = Math.max(1, Math.round(height * scale))
+          context.clearRect(0, 0, canvas.width, canvas.height)
+          context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+          for (const quality of [0.8, 0.68, 0.56, 0.44, 0.34]) {
+            const blob = await new Promise<Blob | null>(done =>
+              canvas.toBlob(done, "image/webp", quality),
+            )
+            if (!blob) {
+              finish(new Error("El navegador no pudo comprimir la fotografía."))
+              return
+            }
+            if (blob.type !== "image/webp") {
+              finish(new Error("Este navegador no admite el formato de imagen necesario. Prueba con Chrome o Edge actualizado."))
+              return
+            }
+            if (blob.size <= maxImageBytes) {
+              const reader = new FileReader()
+              reader.onload = () => finish(undefined, String(reader.result))
+              reader.onerror = () => finish(new Error("No se pudo leer la fotografía optimizada."))
+              reader.readAsDataURL(blob)
+              return
+            }
+          }
+          width = canvas.width * 0.72
+          height = canvas.height * 0.72
+        }
+        finish(new Error("La fotografía sigue siendo muy pesada tras optimizarla. Selecciona una imagen más pequeña."))
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error("No se pudo preparar la fotografía."))
+      }
+      })()
+    }
+    image.onerror = () => {
+      finish(new Error("No se pudo abrir la imagen seleccionada."))
+    }
+    image.src = objectUrl
+  })
+}
+
 function toMinutes(time: string) {
   const [hours, minutes] = time.split(":").map(Number)
   return hours * 60 + minutes
@@ -1151,15 +1343,11 @@ function toTime(minutes: number) {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
 }
 
-export function getBookedTimes(date: string, branchId: BranchId = "main") {
-  const booked = new Set(
-    BLOCKED_TIMES.filter(
-      (item) => item.date === date && (item.branchId ?? "main") === branchId,
-    ).map((item) => item.time),
-  )
+export function getReservedTimes(date: string, branchId: BranchId = "main") {
+  const reserved = new Set<string>()
   BUSY_SLOTS.filter(
     (item) => item.date === date && (item.branchId ?? "main") === branchId,
-  ).forEach((item) => booked.add(item.time))
+  ).forEach((item) => reserved.add(item.time))
   APPOINTMENTS.filter(
     (item) =>
       item.date === date &&
@@ -1169,9 +1357,53 @@ export function getBookedTimes(date: string, branchId: BranchId = "main") {
     const start = toMinutes(item.time)
     const blocks = Math.ceil(appointmentDuration(item) / 60)
     for (let block = 0; block < blocks; block += 1)
-      booked.add(toTime(start + block * 60))
+      reserved.add(toTime(start + block * 60))
   })
+  return reserved
+}
+
+export function getBookedTimes(date: string, branchId: BranchId = "main") {
+  const booked = getReservedTimes(date, branchId)
+  BLOCKED_TIMES.filter(
+    (item) => item.date === date && (item.branchId ?? "main") === branchId,
+  ).forEach((item) => booked.add(item.time))
   return booked
+}
+
+export async function setBlockedTime(
+  date: string,
+  time: string,
+  blocked: boolean,
+  branchId: BranchId = "main",
+) {
+  const record: BlockedTime = { date, time, reason: "Bloqueado por administración", branchId }
+  const reference = doc(
+    db,
+    "blockedTimes",
+    branchDocumentId(`${date}_${time}`, branchId),
+  )
+
+  try {
+    if (blocked) {
+      await setDoc(reference, record)
+      BLOCKED_TIMES = [
+        ...BLOCKED_TIMES.filter(
+          (item) =>
+            !(item.date === date && item.time === time && (item.branchId ?? "main") === branchId),
+        ),
+        record,
+      ]
+    } else {
+      await deleteDoc(reference)
+      BLOCKED_TIMES = BLOCKED_TIMES.filter(
+        (item) =>
+          !(item.date === date && item.time === time && (item.branchId ?? "main") === branchId),
+      )
+    }
+  } catch (error) {
+    console.error("No se pudo actualizar el bloqueo del horario en Firestore:", error)
+    throw error
+  }
 }
 
 export async function refreshBusySlots(date: string) {
@@ -1228,7 +1460,12 @@ export function getNextAvailableDays(
   count = 3,
   branchId: BranchId = "main",
 ) {
-  const days: { date: string label: string day: string times: string[] }[] = []
+  const days: {
+    date: string
+    label: string
+    day: string
+    times: string[]
+  }[] = []
   const start = new Date()
 
   for (let offset = 0; offset < 21 && days.length < count; offset += 1) {
@@ -1297,6 +1534,7 @@ export async function addGalleryPhotoFS(photo: GalleryPhoto) {
     await setDoc(doc(db, "galleryPhotos", id), rest)
   } catch (err) {
     console.error("No se pudo agregar la fotografía en Firestore:", err)
+    throw err
   }
 }
 

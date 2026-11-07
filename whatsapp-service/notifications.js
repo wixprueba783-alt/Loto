@@ -11,11 +11,38 @@ export function normalizePhone(phone) {
   return `${digits}@c.us`
 }
 
+export function serializeWhatsAppId(identifier) {
+  if (typeof identifier === "string") return identifier
+  if (typeof identifier?._serialized === "string") return identifier._serialized
+  if (
+    typeof identifier?.user === "string" &&
+    typeof identifier?.server === "string"
+  ) {
+    return `${identifier.user}@${identifier.server}`
+  }
+  return null
+}
+
 function getFirstName(name) {
-  return (
-    String(name ?? "")
-      .trim()
-      .split(/\s+/)[0] || "cliente"
+  const firstName = String(name ?? "").trim().split(/\s+/)[0] || "cliente"
+  return firstName.charAt(0).toLocaleUpperCase("es-MX") + firstName.slice(1)
+}
+
+export function formatAppointmentTemplate(template, appointment) {
+  const serviceNames = (appointment.services ?? [appointment.service])
+    .map((service) => service?.name)
+    .filter(Boolean)
+    .join(", ")
+  const values = {
+    firstName: getFirstName(appointment.clientName),
+    name: String(appointment.clientName ?? "cliente"),
+    date: formatDate(appointment.date),
+    time: String(appointment.time ?? "hora pendiente"),
+    service: serviceNames || "servicio",
+  }
+  return String(template ?? "").replace(
+    /\{(firstName|name|date|time|service)\}/g,
+    (_, key) => values[key],
   )
 }
 
@@ -36,7 +63,7 @@ export function appointmentConfirmedMessage(appointment) {
 }
 
 export function appointmentReminderMessage(appointment) {
-  return `💅✨ ¡Hola ${getFirstName(appointment.clientName)}! Te recordamos que tienes una cita próximamente.\n\n📅 Fecha: ${formatDate(appointment.date)}\n🕐 Hora: ${appointment.time ?? "hora pendiente"}\n\nPor favor, *confírmanos tu asistencia* respondiendo a este mensaje con un *“Sí, asistiré”*. 💖\n\n¡Te esperamos! Gracias por tu preferencia. ✨`
+  return `💅✨ ¡Hola ${getFirstName(appointment.clientName)}! Te recordamos que tienes una cita próximamente.\n\n📅 Fecha: ${formatDate(appointment.date)}\n🕐 Hora: ${appointment.time ?? "hora pendiente"}\n\nPor favor, confírmanos tu asistencia respondiendo a este mensaje con un “Sí, asistiré”. 💖\n\n¡Te esperamos! Gracias por tu preferencia. ✨`
 }
 
 export function appointmentTimestamp(

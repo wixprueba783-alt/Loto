@@ -17,6 +17,27 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin'));
     }
 
+    function isBranchAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userRole(request.auth.uid) == 'branchAdmin'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('branchId', '') in ['main', 'north'];
+    }
+
+    function assignedBranch() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchId;
+    }
+
+    function canManageBranch(branchId) {
+      return isAdmin() || (isBranchAdmin() && branchId == assignedBranch());
+    }
+
+    function isWorkerInAssignedBranch(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.role == 'worker'
+        && get(/databases/$(database)/documents/users/$(uid)).data.get('branchId', '') == assignedBranch();
+    }
+
     function isWorker() {
       return isSignedIn() && ((exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && userRole(request.auth.uid) == 'worker')
@@ -41,17 +62,20 @@ service cloud.firestore {
 
     match /blockedDays/{dayId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if canManageBranch(request.resource.data.get('branchId', 'main'));
+      allow delete: if canManageBranch(resource.data.get('branchId', 'main'));
     }
 
     match /blockedTimes/{timeId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if canManageBranch(request.resource.data.get('branchId', 'main'));
+      allow delete: if canManageBranch(resource.data.get('branchId', 'main'));
     }
 
     match /availability/{dateId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create, update: if canManageBranch(request.resource.data.get('branchId', 'main'));
+      allow delete: if canManageBranch(resource.data.get('branchId', 'main'));
     }
 
     match /busySlots/{slotId} {
@@ -74,33 +98,60 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.get('duration', getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.get('service', {}).get('duration', -1)) == request.resource.data.duration
         && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.get('branchId', 'main') == request.resource.data.get('branchId', 'main')
       );
-      allow update, delete: if isAdmin();
+      allow update, delete: if isAdmin()
+        || (isBranchAdmin() && resource.data.get('branchId', 'main') == assignedBranch());
     }
 
     match /settings/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin()
+        || (isBranchAdmin()
+          && ((docId == 'ticketSequence' && assignedBranch() == 'main')
+            || (docId == 'ticketSequence_north' && assignedBranch() == 'north')));
     }
 
     match /appointments/{appointmentId} {
       allow create: if (isSignedIn()
         && request.resource.data.ownerUid == request.auth.uid
+        && (!isBranchAdmin() || request.resource.data.get('branchId', 'main') == assignedBranch())
         && request.resource.data.get('branchId', 'main') in ['main', 'north']
+        && request.resource.data.get('privacyConsent', {}).get('accepted', false) == true
+        && request.resource.data.get('privacyConsent', {}).get('version', '') is string
+        && request.resource.data.get('privacyConsent', {}).get('acceptedAt', '') is string
         && (request.resource.data.status == 'pending' || isAdmin()))
-        || (!isSignedIn() && request.resource.data.get('branchId', 'main') in ['main', 'north'] && request.resource.data.status == 'pending');
+        || (!isSignedIn()
+          && request.resource.data.get('branchId', 'main') in ['main', 'north']
+          && request.resource.data.get('privacyConsent', {}).get('accepted', false) == true
+          && request.resource.data.get('privacyConsent', {}).get('version', '') is string
+          && request.resource.data.get('privacyConsent', {}).get('acceptedAt', '') is string
+          && request.resource.data.status == 'pending');
       allow read: if isAdmin()
+        || (isBranchAdmin() && resource.data.get('branchId', 'main') == assignedBranch())
         || (isWorker() && resource.data.workerUid == request.auth.uid)
         || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
-      allow update: if isAdmin();
+      allow update: if isAdmin()
+        || (isBranchAdmin()
+          && resource.data.get('branchId', 'main') == assignedBranch()
+          && request.resource.data.get('branchId', 'main') == assignedBranch()
+          && (request.resource.data.get('workerUid', null) == resource.data.get('workerUid', null)
+            || isWorkerInAssignedBranch(request.resource.data.workerUid)));
       allow delete: if isAdmin();
+    }
+
+    match /whatsappMessageLog/{messageId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     match /users/{userId} {
       allow create: if isAdmin() || (isSignedIn() && request.auth.uid == userId
         && request.resource.data.role == 'client');
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow read: if isAdmin()
+        || (isBranchAdmin() && resource.data.get('branchId', '') == assignedBranch())
+        || (isSignedIn() && request.auth.uid == userId);
       allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId
-        && request.resource.data.role == resource.data.role);
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.get('branchId', null) == resource.data.get('branchId', null));
       allow delete: if isAdmin();
     }
 
