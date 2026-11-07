@@ -2,6 +2,8 @@ import dotenv from "dotenv"
 
 import { createHash, randomUUID } from "node:crypto"
 
+import { existsSync } from "node:fs"
+
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises"
 
 import path from "node:path"
@@ -57,6 +59,19 @@ if (
   process.env.GOOGLE_APPLICATION_CREDENTIALS = resolveFromService(
     process.env.GOOGLE_APPLICATION_CREDENTIALS,
   )
+}
+
+if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  const credentialCandidates = [
+    "/etc/secrets/service-account.json",
+    resolveFromService("./service-account.json"),
+  ]
+  const credentialPath = credentialCandidates.find((candidate) =>
+    existsSync(candidate),
+  )
+  if (credentialPath) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialPath
+  }
 }
 
 function sessionDirPath() {
@@ -148,7 +163,7 @@ export function createWhatsAppService() {
       }),
 
        puppeteer: {
-         executablePath: process.env.CHROME_PATH || "C:\\\\Users\\\\leona\\\\.cache\\\\puppeteer\\\\chrome\\\\win64-156.0.8078.47\\\\chrome-win64\\\\chrome.exe",
+         ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
          headless: true,
 
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -583,7 +598,10 @@ export function createWhatsAppService() {
   }
 
   async function startFirestoreListener() {
-    const projectId = process.env.FIREBASE_PROJECT_ID
+    const projectId =
+      process.env.FIREBASE_PROJECT_ID ||
+      process.env.VITE_FIREBASE_PROJECT_ID ||
+      "loto-19em"
 
     if (!projectId)
       throw new Error("Configura FIREBASE_PROJECT_ID en whatsapp-service/.env.")
