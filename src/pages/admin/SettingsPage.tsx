@@ -48,6 +48,21 @@ interface WhatsAppMessageLogEntry {
   failedAt: string | null
 }
 
+async function fetchWhatsAppWithRetry(input: string, init?: RequestInit) {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fetch(input, init)
+    } catch (error) {
+      lastError = error
+      if (attempt < 2) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500))
+      }
+    }
+  }
+  throw lastError
+}
+
 const automationLabels: Record<WhatsAppAutomationKey, string> = {
   received: "Solicitud recibida",
   confirmed: "Cita confirmada",
@@ -279,7 +294,7 @@ export function AdminSettingsPage({ branchId }: { branchId: BranchId }) {
           )
         }
         const token = await currentUser.getIdToken()
-        const response = await fetch(whatsappApiUrl("status"), {
+        const response = await fetchWhatsAppWithRetry(whatsappApiUrl("status"), {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
         })
