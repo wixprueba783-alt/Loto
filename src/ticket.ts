@@ -84,10 +84,9 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
   ];
 
   const width = 576;
-  const baseWidth = 384;
-  const printScale = width / baseWidth;
   const margin = 18;
-  const scaledFontSize = (fontSize: number) => Math.round(fontSize * printScale);
+  const compactFontSize = (fontSize: number) => fontSize >= 27 ? 14 : fontSize >= 24 ? 13 : 11;
+  const compactGap = (gap: number | undefined) => Math.min(4, Math.max(2, gap ? gap / 4 : 3));
   const contentWidth = width - margin * 2;
   const measuringCanvas = document.createElement('canvas');
   const measuringContext = measuringCanvas.getContext('2d');
@@ -96,7 +95,7 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
   const layout = rows.map(row => {
     if (row.separator) return { row, lines: [] as string[] };
     const text = row.text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    measuringContext.font = `${row.bold ? 'bold ' : ''}${scaledFontSize(row.fontSize)}px Arial`;
+    measuringContext.font = `${row.bold ? 'bold ' : ''}${compactFontSize(row.fontSize)}px Arial`;
     const lines: string[] = [];
     let currentLine = '';
     for (const word of text.split(/\s+/)) {
@@ -111,11 +110,12 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
     if (currentLine) lines.push(currentLine);
     return { row, lines };
   });
-  const bottomPadding = Math.round(56 * printScale);
-  const logoSize = Math.round(220 * printScale);
+  const bottomPadding = 10;
+  const logoSize = 180;
+  const logoTop = 4;
   const height = 12 + logoSize + layout.reduce((sum, item) => sum
-    + (item.row.separator ? 15 : item.lines.length * (scaledFontSize(item.row.fontSize) + 13))
-    + Math.round((item.row.gapAfter ?? 7) * printScale), 0) + bottomPadding;
+    + (item.row.separator ? 8 : item.lines.length * (compactFontSize(item.row.fontSize) + 3))
+    + compactGap(item.row.gapAfter), 0) + bottomPadding;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -125,8 +125,8 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
   context.fillRect(0, 0, width, height);
   context.fillStyle = '#000';
   context.textBaseline = 'top';
-  context.drawImage(logo, (width - logoSize) / 2, 6, logoSize, logoSize);
-  let y = logoSize + 12;
+  context.drawImage(logo, (width - logoSize) / 2, logoTop, logoSize, logoSize);
+  let y = logoTop + logoSize + 4;
   for (const { row, lines: wrappedLines } of layout) {
     if (row.separator) {
       context.save();
@@ -134,21 +134,21 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
       context.lineWidth = 2;
       context.setLineDash([7, 7]);
       context.beginPath();
-      context.moveTo(margin, y + 6);
-      context.lineTo(width - margin, y + 6);
+      context.moveTo(margin, y + 3);
+      context.lineTo(width - margin, y + 3);
       context.stroke();
       context.restore();
-      y += 15 + (row.gapAfter ?? 7);
+      y += 8 + compactGap(row.gapAfter);
       continue;
     }
-    context.font = `${row.bold ? 'bold ' : ''}${scaledFontSize(row.fontSize)}px Arial`;
+    context.font = `${row.bold ? 'bold ' : ''}${compactFontSize(row.fontSize)}px Arial`;
     context.textAlign = row.align ?? 'center';
     const x = row.align === 'left' ? margin : row.align === 'right' ? width - margin : width / 2;
     for (const line of wrappedLines) {
       context.fillText(line, x, y);
-      y += scaledFontSize(row.fontSize) + 13;
+      y += compactFontSize(row.fontSize) + 3;
     }
-    y += Math.round((row.gapAfter ?? 7) * printScale);
+    y += compactGap(row.gapAfter);
   }
 
   const pixels = context.getImageData(0, 0, width, height).data;
