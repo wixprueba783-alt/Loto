@@ -26,6 +26,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore"
 
 import whatsappWeb from "whatsapp-web.js"
 
+import { isBrowserConnected } from "./browser.js"
 import { listenWithRecovery } from "./listener-recovery.js"
 
 import {
@@ -131,7 +132,7 @@ async function clearChromiumSingletonLocks() {
 async function closeWhatsAppClient(whatsappClient) {
   const browser = whatsappClient.pupBrowser
 
-  if (browser?.isConnected()) {
+  if (browser && isBrowserConnected(browser) && typeof browser.close === "function") {
     await Promise.race([
       browser.close(),
       wait(15_000),
