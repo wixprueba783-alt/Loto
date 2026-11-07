@@ -4,7 +4,15 @@ import { createHash, randomUUID } from "node:crypto"
 
 import { existsSync } from "node:fs"
 
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises"
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  unlink,
+  writeFile,
+} from "node:fs/promises"
 
 import path from "node:path"
 
@@ -91,25 +99,32 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 // Espera a que Chrome libere el lockfile de la sesión para poder reutilizar
 // el directorio sin chocar con "The browser is already running".
 async function waitForSessionRelease(timeoutMs = 20_000) {
-  const lockPath = path.join(sessionDirPath(), "lockfile")
+  const lockNames = ["SingletonLock", "SingletonSocket", "SingletonCookie"]
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    try {
-      const handle = await open(lockPath, "r+")
+    const locked = lockNames.some((name) =>
+      existsSync(path.join(sessionDirPath(), name)),
+    )
 
-      await handle.close()
-
-      return
-    } catch (error) {
-      if (error?.code === "ENOENT") return
-
-      await wait(500)
-    }
+    if (!locked) return
+    await wait(500)
   }
 
   console.error(
     `El lockfile de la sesión de WhatsApp siguió ocupado tras ${timeoutMs} ms.`,
+  )
+}
+
+async function clearChromiumSingletonLocks() {
+  await Promise.all(
+    ["SingletonLock", "SingletonSocket", "SingletonCookie"].map(async (name) => {
+      try {
+        await unlink(path.join(sessionDirPath(), name))
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error
+      }
+    }),
   )
 }
 
@@ -133,6 +148,7 @@ async function closeWhatsAppClient(whatsappClient) {
   })
 
   await waitForSessionRelease(30_000)
+  await clearChromiumSingletonLocks()
 }
 
 // Tras un LOGOUT la sesión queda inválida; whatsapp-web.js intenta borrarla
@@ -767,7 +783,10 @@ export function createWhatsAppService() {
 
     status.message = "Iniciando WhatsApp y Firestore…"
 
-    const whatsappStart = client.initialize().catch(async (error) => {
+    const whatsappStart = (async () => {
+      await clearChromiumSingletonLocks()
+      await client.initialize()
+    })().catch(async (error) => {
       status.state = "error"
 
       status.qr = null
@@ -999,6 +1018,7 @@ export function createWhatsAppService() {
       if (stopping) return
 
       await waitForSessionRelease()
+      await clearChromiumSingletonLocks()
 
       if (String(reason).includes("LOGOUT")) await clearWhatsAppSession()
 
