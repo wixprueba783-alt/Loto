@@ -290,7 +290,7 @@ export function AdminSettingsPage({ branchId }: { branchId: BranchId }) {
             .includes("application/json")
         ) {
           throw new Error(
-            "Esta página no está conectada al servicio de WhatsApp. Abre Loto en http://localhost:10000 y vuelve a iniciar sesión.",
+            "Esta página no pudo conectar con el servicio de WhatsApp en Render. Vuelve a iniciar sesión e inténtalo de nuevo.",
           )
         }
         const result = (await response.json()) as WhatsAppStatus & {
