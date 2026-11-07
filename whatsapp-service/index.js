@@ -147,6 +147,13 @@ export function createWhatsAppService() {
 
   const knownAppointments = new Map()
 
+  const chromiumExecutable = [
+    process.env.CHROME_PATH,
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+  ].find((candidate) => candidate && existsSync(candidate))
+
   function createWhatsAppClient() {
     return new Client({
       authStrategy: new LocalAuth({
@@ -163,7 +170,7 @@ export function createWhatsAppService() {
       }),
 
        puppeteer: {
-         ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
+          ...(chromiumExecutable ? { executablePath: chromiumExecutable } : {}),
          headless: true,
 
         args: [
