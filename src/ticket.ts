@@ -84,9 +84,10 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
   ];
 
   const width = 576;
-  const margin = 18;
-  const compactFontSize = (fontSize: number) => fontSize >= 27 ? 14 : fontSize >= 24 ? 13 : 11;
+  const margin = 8;
+  const compactFontSize = (fontSize: number) => fontSize >= 27 ? 14 : fontSize >= 24 ? 13 : 12;
   const compactGap = (gap: number | undefined) => Math.min(4, Math.max(2, gap ? gap / 4 : 3));
+  const lineHeight = (fontSize: number) => Math.round(fontSize * 1.2);
   const contentWidth = width - margin * 2;
   const measuringCanvas = document.createElement('canvas');
   const measuringContext = measuringCanvas.getContext('2d');
@@ -111,10 +112,11 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
     return { row, lines };
   });
   const bottomPadding = 10;
-  const logoSize = 180;
+  const logoWidth = 300;
+  const logoHeight = 300;
   const logoTop = 4;
-  const height = 12 + logoSize + layout.reduce((sum, item) => sum
-    + (item.row.separator ? 8 : item.lines.length * (compactFontSize(item.row.fontSize) + 3))
+  const height = 12 + logoHeight + layout.reduce((sum, item) => sum
+    + (item.row.separator ? 8 : item.lines.length * lineHeight(compactFontSize(item.row.fontSize)))
     + compactGap(item.row.gapAfter), 0) + bottomPadding;
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -125,8 +127,8 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
   context.fillRect(0, 0, width, height);
   context.fillStyle = '#000';
   context.textBaseline = 'top';
-  context.drawImage(logo, (width - logoSize) / 2, logoTop, logoSize, logoSize);
-  let y = logoTop + logoSize + 4;
+  context.drawImage(logo, (width - logoWidth) / 2, logoTop, logoWidth, logoHeight);
+  let y = logoTop + logoHeight + 4;
   for (const { row, lines: wrappedLines } of layout) {
     if (row.separator) {
       context.save();
@@ -146,7 +148,7 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
     const x = row.align === 'left' ? margin : row.align === 'right' ? width - margin : width / 2;
     for (const line of wrappedLines) {
       context.fillText(line, x, y);
-      y += compactFontSize(row.fontSize) + 3;
+      y += lineHeight(compactFontSize(row.fontSize));
     }
     y += compactGap(row.gapAfter);
   }
