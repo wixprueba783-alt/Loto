@@ -84,10 +84,10 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
   ];
 
   const width = 576;
-  const margin = 8;
-  const compactFontSize = (fontSize: number) => fontSize >= 27 ? 14 : fontSize >= 24 ? 13 : 12;
-  const compactGap = (gap: number | undefined) => Math.min(4, Math.max(2, gap ? gap / 4 : 3));
-  const lineHeight = (fontSize: number) => Math.round(fontSize * 1.2);
+  const margin = 10;
+  const ticketFontSize = (fontSize: number) => fontSize >= 27 ? 24 : fontSize >= 24 ? 22 : 18;
+  const compactGap = (gap: number | undefined) => Math.min(6, Math.max(3, gap ? gap / 3 : 4));
+  const lineHeight = (fontSize: number) => Math.round(fontSize * 1.5);
   const contentWidth = width - margin * 2;
   const measuringCanvas = document.createElement('canvas');
   const measuringContext = measuringCanvas.getContext('2d');
@@ -96,7 +96,7 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
   const layout = rows.map(row => {
     if (row.separator) return { row, lines: [] as string[] };
     const text = row.text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    measuringContext.font = `${row.bold ? 'bold ' : ''}${compactFontSize(row.fontSize)}px Arial`;
+    measuringContext.font = `${row.bold ? 'bold ' : ''}${ticketFontSize(row.fontSize)}px Arial`;
     const lines: string[] = [];
     let currentLine = '';
     for (const word of text.split(/\s+/)) {
@@ -112,11 +112,11 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
     return { row, lines };
   });
   const bottomPadding = 10;
-  const logoWidth = 300;
-  const logoHeight = 300;
+  const logoWidth = 350;
+  const logoHeight = 350;
   const logoTop = 4;
   const height = 12 + logoHeight + layout.reduce((sum, item) => sum
-    + (item.row.separator ? 8 : item.lines.length * lineHeight(compactFontSize(item.row.fontSize)))
+    + (item.row.separator ? 8 : item.lines.length * lineHeight(ticketFontSize(item.row.fontSize)))
     + compactGap(item.row.gapAfter), 0) + bottomPadding;
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -143,12 +143,12 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
       y += 8 + compactGap(row.gapAfter);
       continue;
     }
-    context.font = `${row.bold ? 'bold ' : ''}${compactFontSize(row.fontSize)}px Arial`;
+    context.font = `${row.bold ? 'bold ' : ''}${ticketFontSize(row.fontSize)}px Arial`;
     context.textAlign = row.align ?? 'center';
     const x = row.align === 'left' ? margin : row.align === 'right' ? width - margin : width / 2;
     for (const line of wrappedLines) {
       context.fillText(line, x, y);
-      y += lineHeight(compactFontSize(row.fontSize));
+      y += lineHeight(ticketFontSize(row.fontSize));
     }
     y += compactGap(row.gapAfter);
   }
