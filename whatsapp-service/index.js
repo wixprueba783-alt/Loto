@@ -113,6 +113,28 @@ async function waitForSessionRelease(timeoutMs = 20_000) {
   )
 }
 
+async function closeWhatsAppClient(whatsappClient) {
+  const browser = whatsappClient.pupBrowser
+
+  if (browser?.isConnected()) {
+    await Promise.race([
+      browser.close(),
+      wait(15_000),
+    ]).catch((error) => {
+      console.error("No se pudo cerrar Chromium antes de destruir WhatsApp:", error)
+    })
+  }
+
+  await Promise.race([
+    whatsappClient.destroy(),
+    wait(15_000),
+  ]).catch((error) => {
+    console.error("No se pudo destruir el cliente de WhatsApp:", error)
+  })
+
+  await waitForSessionRelease(30_000)
+}
+
 // Tras un LOGOUT la sesión queda inválida; whatsapp-web.js intenta borrarla
 // pero puede fallar con EBUSY si Chrome aún no cerró. Aquí se reintenta.
 async function clearWhatsAppSession() {
@@ -757,12 +779,7 @@ export function createWhatsAppService() {
 
       console.error("No se pudo iniciar el servicio de WhatsApp:", error)
 
-      await client.destroy().catch((cleanupError) => {
-        console.error(
-          "No se pudo cerrar el navegador de WhatsApp:",
-          cleanupError,
-        )
-      })
+      await closeWhatsAppClient(client)
 
       scheduleWhatsAppRecovery(error)
     })
@@ -977,12 +994,7 @@ export function createWhatsAppService() {
     let recoveryError
 
     whatsappRecoveryPromise = (async () => {
-      await previousClient.destroy().catch((error) => {
-        console.error(
-          "No se pudo cerrar la conexión anterior de WhatsApp:",
-          error,
-        )
-      })
+      await closeWhatsAppClient(previousClient)
 
       if (stopping) return
 
