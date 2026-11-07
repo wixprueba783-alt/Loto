@@ -191,6 +191,37 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (pathname === "/api/whatsapp/history") {
+    if (request.method !== "GET") {
+      response.writeHead(405, { Allow: "GET" })
+      response.end()
+      return
+    }
+
+    const authorization = request.headers.authorization
+    const token =
+      typeof authorization === "string" && authorization.startsWith("Bearer ")
+        ? authorization.slice(7)
+        : ""
+
+    try {
+      await whatsapp.authorizeAdmin(token)
+      sendJson(response, 200, await whatsapp.getNotificationHistory())
+    } catch (error) {
+      const statusCode =
+        typeof error === "object" && error !== null && "statusCode" in error
+          ? Number(error.statusCode)
+          : 500
+      sendJson(response, statusCode, {
+        message:
+          error instanceof Error
+            ? error.message
+            : "No se pudo consultar el historial.",
+      })
+    }
+    return
+  }
+
   if (pathname === "/api/whatsapp/reminder") {
     if (request.method !== "POST") {
       response.writeHead(405, { Allow: "POST" })
