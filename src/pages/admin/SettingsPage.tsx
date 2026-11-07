@@ -50,13 +50,13 @@ interface WhatsAppMessageLogEntry {
 
 async function fetchWhatsAppWithRetry(input: string, init?: RequestInit) {
   let lastError: unknown
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     try {
       return await fetch(input, init)
     } catch (error) {
       lastError = error
-      if (attempt < 2) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1500))
+      if (attempt < 5) {
+        await new Promise((resolve) => window.setTimeout(resolve, 5000))
       }
     }
   }
