@@ -83,7 +83,7 @@ export async function ticketToRawBtUrl(ticket: PrintableTicket) {
     { text: 'Gracias por tu preferencia', fontSize: 23, align: 'center', gapAfter: 12 },
   ];
 
-  const width = 384;
+  const width = 576;
   const baseWidth = 384;
   const printScale = width / baseWidth;
   const margin = 18;
