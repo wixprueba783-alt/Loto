@@ -28,6 +28,7 @@ import type {
   WhatsAppAutomationSettings,
 } from "./types"
 import type { Role, User } from "./types"
+import { getAppointmentTimeSlots } from "./appointment-slots"
 
 /* Nombres visibles de cada sucursal. El tema rosa corresponde a "main"
    (San Nicolás) y el tema oliva a "north" (Escobedo). */
@@ -489,11 +490,7 @@ async function backfillBusySlots(appointments: Appointment[]) {
     .filter((appointment) => appointment.status !== "cancelled")
     .forEach((appointment) => {
       const duration = appointmentDuration(appointment)
-      const blocks = Math.ceil(duration / 60)
-      const startMinutes = toMinutes(appointment.time)
-      Array.from({ length: blocks }, (_, slotIndex) =>
-        toTime(startMinutes + slotIndex * 60),
-      ).forEach((time) => {
+      getAppointmentTimeSlots(appointment.time, duration).forEach((time) => {
         const branchId = appointment.branchId ?? "main"
         const id = makeBusySlotId(appointment.date, time, branchId)
         const existing = desiredSlots.get(id)
@@ -780,11 +777,8 @@ export async function addAppointment(
   const rest = Object.fromEntries(
     Object.entries(appointmentData).filter(([, value]) => value !== undefined),
   )
-  const blocks = Math.ceil(duration / 60)
-  const startMinutes = toMinutes(appointment.time)
-  const slotTimes = Array.from({ length: blocks }, (_, index) =>
-    toTime(startMinutes + index * 60),
-  )
+  const slotTimes = getAppointmentTimeSlots(appointment.time, duration)
+  const blocks = slotTimes.length
   const slotRefs = slotTimes.map((time) =>
     doc(db, "busySlots", makeBusySlotId(appointment.date, time, branchId)),
   )
@@ -1354,10 +1348,9 @@ export function getReservedTimes(date: string, branchId: BranchId = "main") {
       (item.branchId ?? "main") === branchId &&
       item.status !== "cancelled",
   ).forEach((item) => {
-    const start = toMinutes(item.time)
-    const blocks = Math.ceil(appointmentDuration(item) / 60)
-    for (let block = 0; block < blocks; block += 1)
-      reserved.add(toTime(start + block * 60))
+    getAppointmentTimeSlots(item.time, appointmentDuration(item)).forEach(
+      (time) => reserved.add(time),
+    )
   })
   return reserved
 }
@@ -1430,7 +1423,7 @@ export function getAvailableTimes(
 
   const open = toMinutes(availability.open)
   const close = toMinutes(availability.close)
-  const blocks = Math.ceil(duration / 60)
+  const blockCount = getAppointmentTimeSlots("00:00", duration).length
   const booked = getBookedTimes(date, branchId)
   const times: string[] = []
   const now = new Date()
@@ -1441,10 +1434,8 @@ export function getAvailableTimes(
   // Cuando ya llego la hora de cierre, el dia no puede ofrecer ningun horario.
   if (isToday && currentMinutes >= close) return []
 
-  for (let start = open; start + blocks * 60 <= close; start += 60) {
-    const slots = Array.from({ length: blocks }, (_, index) =>
-      toTime(start + index * 60),
-    )
+  for (let start = open; start + blockCount * 60 <= close; start += 60) {
+    const slots = getAppointmentTimeSlots(toTime(start), duration)
     if (
       (!isToday || start > currentMinutes) &&
       slots.every((slot) => !booked.has(slot))
