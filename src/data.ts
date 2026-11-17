@@ -762,6 +762,7 @@ export async function addAppointment(
   branchId: BranchId = "main",
 ) {
   const duration = appointmentDuration(appointment)
+  const startMinutes = toMinutes(appointment.time)
   const appointmentRef = doc(collection(db, "appointments"))
   const id = appointmentRef.id
   const appointmentToSave = {
