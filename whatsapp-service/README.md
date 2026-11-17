@@ -74,6 +74,17 @@ La computadora dedicada puede ejecutar el servicio sin tener una terminal abiert
 
 El dominio público no podrá mostrar el estado/QR de WhatsApp de la computadora local a menos que se configure además una conexión HTTPS segura desde el dominio hacia esa computadora. Esto no impide el envío de avisos: los recordatorios manuales se guardan en Firestore y el servicio local los detecta. El QR inicial se escanea desde `localhost` en la computadora dedicada.
 
+## Migrar desde Render al servicio local
+
+Para evitar la sesión de WhatsApp Web en Render, usa una computadora Windows dedicada:
+
+1. Ejecuta `whatsapp-service/Instalar-Servicio-WhatsApp.bat` y configura el archivo `.env` local con las credenciales de Firebase.
+2. Abre `http://localhost:10000`, inicia sesión como administradora y escanea el QR en **Configuración → WhatsApp**.
+3. Mantén esa computadora encendida y sin suspensión. El servicio local observará las citas en Firestore y enviará los avisos aunque las clientas usen el dominio público.
+4. Cuando confirmes que el servicio local está conectado, detén el servicio `loto-whatsapp` en Render para evitar notificaciones duplicadas.
+
+La aplicación detecta automáticamente `localhost:10000` y usa el servicio local sin CORS. El dominio público no debe apuntar a `localhost`, porque el navegador de cada clienta interpretaría esa dirección como su propia computadora.
+
 Las tareas se llaman `Loto WhatsApp Notifications` y `Loto WhatsApp Resume Recovery`. Los registros están en `whatsapp-service/logs/service.log` y `whatsapp-service/logs/recovery.log`. Si el servicio falla, el iniciador oculto lo intenta levantar de nuevo. Las escuchas de Firestore se restablecen automáticamente tras errores, con reintentos que aumentan hasta un minuto; además, cada minuto el servicio vuelve a leer las citas para recuperar eventos perdidos, como solicitudes de recordatorio manual tras suspender la computadora. Si Chromium o WhatsApp Web queda inutilizable al reanudar desde suspensión, Windows reinicia el servicio al desbloquear la sesión y este reintenta los mensajes pendientes. La carga inicial de citas también se reintenta mientras Firestore no responda. Para actualizar el código, descarga la nueva versión y vuelve a ejecutar el instalador.
 
 El servicio omite las citas que ya existían cuando se instala por primera vez. Para las citas nuevas, envía un mensaje de recepción al número guardado en `clientPhone`. Si el número tiene diez dígitos, se interpreta como mexicano y se agrega el prefijo `52`. Si la confirmación automática está activa, la cita se crea como confirmada y recibe directamente el mensaje de confirmación; de lo contrario, cuando la administración cambia el estado de `pending` a `confirmed`, envía los datos de fecha y hora guardados en Firestore. Para citas confirmadas, busca cada minuto si llegó el momento de enviar el recordatorio según las horas configuradas en `settings/general.reminderHours` (24 horas por defecto); las citas canceladas no reciben ese recordatorio. Las respuestas de las clientas al recordatorio no se procesan ni guardan automáticamente.
