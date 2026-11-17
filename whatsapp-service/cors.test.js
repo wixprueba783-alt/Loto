@@ -13,7 +13,10 @@ test("parses and normalizes allowed web origins", () => {
 test("allows the production Vercel origin by default", () => {
   assert.deepEqual(
     [...parseAllowedOrigins()],
-    ["https://loto-nails.vercel.app"],
+    [
+      "https://loto-nails.vercel.app",
+      "https://loto-sigma-eight.vercel.app",
+    ],
   )
 })
 

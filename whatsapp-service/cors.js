@@ -15,7 +15,9 @@ function normalizeOrigin(value) {
   }
 }
 
-export function parseAllowedOrigins(value = "https://loto-nails.vercel.app") {
+export function parseAllowedOrigins(
+  value = "https://loto-nails.vercel.app,https://loto-sigma-eight.vercel.app",
+) {
   return new Set(
     value
       .split(",")
